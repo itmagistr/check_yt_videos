@@ -20,5 +20,34 @@ class CheckData(db.Entity):
 	url = orm.Optional(str)
 	data = orm.Optional(orm.Json)
 
+class TagSEO(db.Entity):
+	dt = orm.Required(datetime.datetime, default=datetime.datetime.now())
+	vid = orm.Required(str)
+	url = orm.Required(str)
+	tag = orm.Required(str)
+	seo = orm.Optional(float)
+	real = orm.Optional(float)
+	tcount = orm.Optional(int)
+	tpopular = orm.Optional(int)
+	tintitle = orm.Optional(int)
+	tindesc = orm.Optional(int)
+	triple = orm.Optional(int)
+	tshow = orm.Optional(float)
+	ranked = orm.Optional(int)
+	hivolume = orm.Optional(int)
+	data = orm.Optional(orm.Json)
+
+class TagUpdate(db.Entity):
+	dt = orm.Required(datetime.datetime, default=datetime.datetime.now())
+	vid = orm.Required(str)
+	tags1 = orm.Required(str)
+	real1 = orm.Optional(float)
+	tshow1 = orm.Optional(float)
+	tags2 = orm.Required(str)
+	real2 = orm.Optional(float)
+	tshow2 = orm.Optional(float)
+	jdata = orm.Optional(orm.Json)
+	saved = orm.Optional(int)
+
 
 db.generate_mapping(create_tables=True)
