@@ -59,6 +59,8 @@ def main(opts):
 	driver.implicitly_wait(3)
 	driver.maximize_window()
 	#протестировать подключение к хрому
+	
+	discardChanges(driver, 2)
 	driver.get('https://youtube.com')
 	try:
 		testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_id("avatar-btn"))
@@ -425,7 +427,11 @@ def SaveCheckData(cdata):
 			cd.dt=datetime.datetime.now()
 
 def write2xls(ws, crow, data):
-	ws.cell(row=crow, column=1, value=int(data["num"]) if 'num' in data else '')
+	inum = ''
+	if 'num' in data:
+		if data["num"] is not None:
+			inum = int(data["num"])
+	ws.cell(row=crow, column=1, value=inum)
 	ws.cell(row=crow, column=2, value=data["title"] if 'title' in data else '')
 	ws.cell(row=crow, column=3, value=data["url"] if 'url' in data else '')
 
@@ -445,12 +451,20 @@ def write2xls(ws, crow, data):
 		key = 'chl-{}'.format(i)
 		ws.cell(row=crow, column=i, value=int(data[key]) if key in data else '')
 
+def discardChanges(drv, wt=0.5):
+	#logging.info('cancel changes')
+	try:
+		btn=drv.find_element_by_id('discard')
+		btn.click()
+		time.sleep(wt)
+	except:
+		pass
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	#parser.add_argument('--dt', help='report date "YYYY-MM-DD"', default=datetime.datetime.today().strftime('%Y-%m-%d'))
 	parser.add_argument('--timeout', help='waiting timeout to load the page', default='10')
-	parser.add_argument('--xls', help='input file xlsm', default='c:\\web\\GAPIpy3\\yt_data_v3\\Ссылки_200501_2300.xlsm')
+	parser.add_argument('--xls', help='input file xlsm', default='c:\\web\\GAPIpy3\\yt_data_v3\\Ссылки_200508_0100.xlsm')
 	parser.add_argument('--chrome', help='chrome driver path', default='C:\\Web\\GAPIpy3\\yt_data_v3\\driver\\chromedriver')
 	parser.add_argument('--chromedir', help='chrome user profile data path', default='C:\\UpDate\YT\\test_data')
 	parser.add_argument('--dt', help='expire datetime', default='2020-05-03 12:00')
