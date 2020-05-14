@@ -2,6 +2,7 @@
 import sys
 import argparse
 import time
+import datetime
 import pyperclip
 from check_yt_models import *
 from pony import orm
@@ -37,125 +38,131 @@ def main(opts):
 	driver.set_page_load_timeout(120)
 	driver.implicitly_wait(10)
 	driver.maximize_window()
+	discardChanges(driver,2) #если при запуске есть не сохраненные изменения, то отменяем перед началом перехода по ссылке
 	#driver.get("http://ya.ru")
-	crow=0
-	for i, u in urls.items():
-		crow+=1
-		logging.info('-------- Обработка {:03d} из {:03d} ({:06.2f} %), {}'.format(crow, urlslen, 100.00*crow/urlslen, u))
-		cdata = {}
-		
-		if opts.update == '3':
-			# обновление тегов если значение рейтингов выше
-			odt = datetime.datetime.strptime(opts.dt, '%Y-%m-%d %H:%M')
-			d = CheckSavedData(i, odt)
-			if d is not None:
-				logging.info('treal:{} -> {}, tshow: {} -> {}, at {}'.format(d['rate'][0]['treal'], d['rate'][1]['treal'], d['rate'][0]['tshow'], d['rate'][1]['tshow'], d['dt']))
-			else:
-				tagsUpdate(driver, i, u, opts)
-
-		elif opts.update in '012': #режим 0, 1, 2
-			driver.get(u)
-			time.sleep(2)
-			try:
-				testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
-			except TimeoutException:
-				logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
-				continue
+	
+	if opts.words=='1':
+		# собрать рейтинг seo для слов из файла для видео в первой строке
+		rateWords(driver, opts)
+	else:
+		crow=0
+		for i, u in urls.items():
+			crow+=1
+			logging.info('-------- Обработка {:03d} из {:03d} ({:06.2f} %), {}'.format(crow, urlslen, 100.00*crow/urlslen, u))
+			cdata = {}
 			
-			if opts.update == '2':
-					# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
-					for t in getDBtags(i, u):
-						cdata[t]={}
-			elif opts.update in '01': #режим 0 или 1
-				#собрать теги
-				for elm in driver.find_elements_by_xpath("//*[@id='child-input']//ytcp-chip[@role='button']"):
-					text = elm.get_attribute('vidiq-keyword')
-					if opts.update == '0':
-						# все теги видео добавить к проверке
-						cdata[text]={}
-					elif opts.update == '1':
-						if getDBTagSeo(i, u, text) < 0.01:
-							# новые и с оценкой ноль добавить для проверки
-							cdata[text]={}
-
-			
-			# добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
-			elq = driver.find_element_by_id('text-input')
-			elq.click()
-			
-			# pyperclip.copy('word1, word2')
-			# time.sleep(0.5)
-			# elq.send_keys(Keys.CONTROL, 'v')
-			# time.sleep(0.5)
-			
-			# #clear all tags
-			doit_clear=2
-			while doit_clear>0:
-				try:
-					di = driver.find_element_by_id('clear-button')
-					di.click()
-					doit_clear=0
-				except:
-					logging.info("find_element_by_id('clear-button') Unexpected error: {}".format(sys.exc_info()[0]))
-					elq.send_keys('wr1,wr2', Keys.ENTER)
-					time.sleep(0.5)
-					doit_clear-=1
-
-			# по тегам сохранить рейтинг
-			tagscnt=1+len(cdata.keys())
-			for t in cdata.keys():
-				tagscnt-=1
-				#add new tags
-				elq.click()
-				if opts.clipboard == '1':
-					pyperclip.copy(t)
-					time.sleep(0.5)
-					#elq.send_keys(Keys.CONTROL, 'v')
-					elq.send_keys(Keys.SHIFT, Keys.INSERT)
+			if opts.update == '3':
+				# обновление тегов если значение рейтингов выше
+				odt = datetime.datetime.strptime(opts.dt, '%Y-%m-%d %H:%M')
+				d = CheckSavedData(i, odt)
+				if d is not None:
+					logging.info('treal:{} -> {}, tshow: {} -> {}, at {}'.format(d['rate'][0]['treal'], d['rate'][1]['treal'], d['rate'][0]['tshow'], d['rate'][1]['tshow'], d['dt']))
 				else:
-					elq.send_keys(t, Keys.ENTER)
-				time.sleep(3)
+					tagsUpdate(driver, i, u, opts)
 
-				#get SEO score
-				elm=driver.find_element_by_class_name('stat-value-seo-score')
-				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
-				#logging.info('seo {}'.format(elm1.text))
-				cdata[t]['seo'] = float(elm1.text)
+			elif opts.update in '012': #режим 0, 1, 2
+				driver.get(u)
+				time.sleep(2)
+				try:
+					testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+				except TimeoutException:
+					logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+					continue
 				
-				if cdata[t]['seo'] < 0.01:
-					# если не успело значение обновиться, то подождем еще и вычитаем повторно
-					time.sleep(2)
+				if opts.update == '2':
+						# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
+						for t in getDBtags(i, u):
+							cdata[t]={}
+				elif opts.update in '01': #режим 0 или 1
+					#собрать теги
+					for elm in driver.find_elements_by_xpath("//*[@id='child-input']//ytcp-chip[@role='button']"):
+						text = elm.get_attribute('vidiq-keyword')
+						if opts.update == '0':
+							# все теги видео добавить к проверке
+							cdata[text]={}
+						elif opts.update == '1':
+							if getDBTagSeo(i, u, text) < 0.01:
+								# новые и с оценкой ноль добавить для проверки
+								cdata[text]={}
+
+				
+				# добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
+				elq = driver.find_element_by_id('text-input')
+				elq.click()
+				
+				# pyperclip.copy('word1, word2')
+				# time.sleep(0.5)
+				# elq.send_keys(Keys.CONTROL, 'v')
+				# time.sleep(0.5)
+				
+				# #clear all tags
+				doit_clear=2
+				while doit_clear>0:
+					try:
+						di = driver.find_element_by_id('clear-button')
+						di.click()
+						doit_clear=0
+					except:
+						logging.info("find_element_by_id('clear-button') Unexpected error: {}".format(sys.exc_info()[0]))
+						elq.send_keys('wr1,wr2', Keys.ENTER)
+						time.sleep(0.5)
+						doit_clear-=1
+
+				# по тегам сохранить рейтинг
+				tagscnt=1+len(cdata.keys())
+				for t in cdata.keys():
+					tagscnt-=1
+					#add new tags
+					elq.click()
+					if opts.clipboard == '1':
+						pyperclip.copy(t)
+						time.sleep(0.5)
+						#elq.send_keys(Keys.CONTROL, 'v')
+						elq.send_keys(Keys.SHIFT, Keys.INSERT)
+					else:
+						elq.send_keys(t, Keys.ENTER)
+					time.sleep(3)
+
 					#get SEO score
 					elm=driver.find_element_by_class_name('stat-value-seo-score')
 					elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
-					#logging.info('seo2 {}'.format(elm1.text))
+					#logging.info('seo {}'.format(elm1.text))
 					cdata[t]['seo'] = float(elm1.text)
-				getScores(driver, cdata[t])
-				
-				# удалить тег
-				try:
-					btn = driver.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
-					if len(btn) > 1:
-						di = driver.find_element_by_id('clear-button')
-						di.click()
-					else:
-						btn[0].click()
-				except:
-					logging.info("ERROR: {}".format(sys.exc_info()[0]))
 					
+					if cdata[t]['seo'] < 0.01:
+						# если не успело значение обновиться, то подождем еще и вычитаем повторно
+						time.sleep(2)
+						#get SEO score
+						elm=driver.find_element_by_class_name('stat-value-seo-score')
+						elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+						#logging.info('seo2 {}'.format(elm1.text))
+						cdata[t]['seo'] = float(elm1.text)
+					getScores(driver, cdata[t])
+					
+					# удалить тег
+					try:
+						btn = driver.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+						if len(btn) > 1:
+							di = driver.find_element_by_id('clear-button')
+							di.click()
+						else:
+							btn[0].click()
+					except:
+						logging.info("ERROR: {}".format(sys.exc_info()[0]))
+						
 
-				logging.info('{:03d}/{:03d}, {:03d} {}->{}'.format(crow, urlslen, tagscnt, t, cdata[t]['seo']))
-				if opts.update=='2':
-					saveindb({'vid': i, 'url': u, 'tags': {t: cdata[t]}, })
+					logging.info('{:03d}/{:03d}, {:03d} {}->{}'.format(crow, urlslen, tagscnt, t, cdata[t]['seo']))
+					if opts.update=='2':
+						saveindb({'vid': i, 'url': u, 'tags': {t: cdata[t]}, })
+				
+				#logging.info('cancel changes')
+				btn=driver.find_element_by_id('discard')
+				btn.click()
+				time.sleep(0.5)
+
+				if opts.update!='2':
+					saveindb({'vid': i, 'url': u, 'tags': cdata})
 			
-			#logging.info('cancel changes')
-			btn=driver.find_element_by_id('discard')
-			btn.click()
-			time.sleep(0.5)
-
-			if opts.update!='2':
-				saveindb({'vid': i, 'url': u, 'tags': cdata})
-		
 		
 
 
@@ -255,6 +262,17 @@ def clearAlltags(drv, inp):
 			doit_clear-=1
 	pass
 
+# удалить тег
+def delTag(drv):
+	try:
+		btn = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+		if len(btn) > 1:
+			di = drv.find_element_by_id('clear-button')
+			di.click()
+		else:
+			btn[0].click()
+	except:
+		logging.info("ERROR: {}".format(sys.exc_info()[0]))
 
 
 def saveindb(vdata):
@@ -422,6 +440,80 @@ def CheckSavedData(vid, dt):
 			break
 	return cdjson
 
+def discardChanges(drv, wt=0.5):
+	#logging.info('cancel changes')
+	try:
+		btn=drv.find_element_by_id('discard')
+		btn.click()
+		time.sleep(wt)
+	except:
+		pass
+
+def rateWords(drv, opts):
+	words = []
+	addwrds = []
+	with open(opts.infile, 'r', encoding='utf-8') as fl:
+		linecnt = 0
+		for line in fl.readlines():
+			linecnt+=1
+			if linecnt==1:
+				url = line.strip()
+			else:
+				t = line.strip()
+				if len(t)>0:
+					words+=[t]
+	wordscnt= len(words)				
+	logging.info('Прочитано из файла слов: {}'.format(wordscnt))
+	logging.info('Перехожу по ссылке: {}'.format(url))
+	#discardChanges(drv,1)
+	drv.get(url)
+	time.sleep(3)
+	try:
+		testElm = WebDriverWait(drv, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+	except TimeoutException:
+		logging.info("Превышено время ожидания загрузки страницы.")
+		exit(11)
+		
+	inp = drv.find_element_by_id('text-input')
+	clearAlltags(drv, inp)
+	inp.click()
+	for w in words:
+		inp.click()
+		if opts.clipboard=='1':
+			pyperclip.copy(w)
+			time.sleep(0.5)
+			inp.send_keys(Keys.SHIFT, Keys.INSERT)
+		else:
+			inp.send_keys(w+',',Keys.ENTER)
+		time.sleep(3)
+		# подождать появления подсказок
+		sugText=''
+		try:
+			wElm = WebDriverWait(drv, float(2)).until(lambda x: x.find_element_by_class_name("vidiq-studio-beta-keyword-text"))
+			sugText=wElm.text
+		except TimeoutException:
+			pass
+		if len(sugText)>0:
+			restxt = []
+			for el in drv.find_elements_by_class_name("vidiq-studio-beta-keyword-text"):
+				if el.is_displayed():
+					restxt += [el.text]
+			if len(restxt) > 0:
+				sugText=';'.join(restxt)
+				addwrds+=restxt
+
+		#get SEO score
+		elm=drv.find_element_by_class_name('stat-value-seo-score')
+		elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+		logging.info('{};{};{}'. format(w, elm1.text, sugText))
+		delTag(drv)
+	discardChanges(drv)
+	newresfile = '!addwords_{}.txt'.format(datetime.datetime.now().strftime('%y%m%d_%H%M'))
+	with open(newresfile, 'w', encoding='utf-8') as flres:
+		for adw in addwrds:
+			flres.writelines([adw+'\n'])
+	exit(999)
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--timeout', help='waiting timeout to load the page', default='10')
@@ -432,6 +524,7 @@ if __name__ == '__main__':
 	parser.add_argument('--clipboard', help='inserts tags by clipboard', default='1')
 	parser.add_argument('--realsave', help='save changes', default='0')
 	parser.add_argument('--dt', help='expire datetime', default='2020-05-12 12:00')
+	parser.add_argument('--words', help='rate words on seo in infile', default='0')
 	args = parser.parse_args()
 	main(args)
 
