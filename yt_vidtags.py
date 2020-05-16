@@ -45,6 +45,9 @@ def main(opts):
 		# собрать рейтинг seo для слов из файла для видео в первой строке
 		rateWords(driver, opts)
 	else:
+		excludeTags = []
+		if opts.update=='2':
+			excludeTags = getExtags(1, 2, 7) # min< 1, avg< 2, max< 7
 		crow=0
 		for i, u in urls.items():
 			crow+=1
@@ -71,7 +74,7 @@ def main(opts):
 				
 				if opts.update == '2':
 						# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
-						for t in getDBtags(i, u):
+						for t in getDBtags(i, u, excludeTags):
 							cdata[t]={}
 				elif opts.update in '01': #режим 0 или 1
 					#собрать теги
@@ -169,6 +172,7 @@ def main(opts):
 
 
 def tagsUpdate(drv, vid, url, o):
+	svd = 0 # не привело к сохранению в видео ютюб
 	drv.get(url)
 	time.sleep(2)
 	try:
@@ -178,71 +182,127 @@ def tagsUpdate(drv, vid, url, o):
 		
 	# сформировать предлагаемый перечень тегов для замены
 	ntags=getSEOtags(vid)
-	logging.info(len(ntags))
+
 	# сохранить текущее состояние видео
 	vidSEO1 = getYTseo4Vid(drv)
-	logging.info(vidSEO1)
-	# подставить новую строку тегов
-	tagStr = ''
-	tagslen = 0
-	for t in ntags:
-		if tagslen < 500 and tagslen+len(t) < 500:
-			tagStr += ','+t
-			tagslen +=  len(t)
-		else:
-			break
+	logging.info('seo1: {}'.format(vidSEO1['treal']))
 	
-	logging.info('new tags:'+tagStr)
+	if len(ntags) > 0:
+		logging.info('{} слов для формирования строки тегов'.format(len(ntags)))
+		# подставить новую строку тегов
+		tagStr = ''
+		tagslen = 0
+		for t in ntags:
+			if tagslen < 500 and tagslen+len(t) < 500:
+				tagStr += ','+t
+				tagslen +=  len(t)
+			else:
+				break
+		
+		#logging.info('new tags:'+tagStr)
 
-	inp = drv.find_element_by_id('text-input')
-	clearAlltags(drv, inp)
-	inp.click()
-	pyperclip.copy(tagStr)
-	time.sleep(0.5)
-	# вставить новую строку тегов
-	#inp.send_keys(Keys.CONTROL, 'v')
-	inp.send_keys(Keys.SHIFT, Keys.INSERT)
-	time.sleep(2)
-	# проверить длинну <div slot="description" id="tags-count" class="style-scope ytcp-video-metadata-basics">155/500</div>
-	tlen = 501
-	while tlen > 500:
-		# откорректировать длинну
-		tagslength = drv.find_element_by_id('tags-count')
-		logging.info('tags-count: {}'.format(tagslength.text))
-		chcnt = tagslength.text.split('/')
-		logging.info('tags-count: {}'.format(chcnt[0]))
-		tlen = int(chcnt[0])
-		if tlen > 500:
-			delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
-			if len(delbtns) > 0:
-				delbtns[-1].click()
+		inp = drv.find_element_by_id('text-input')
+		clearAlltags(drv, inp)
+		inp.click()
+		pyperclip.copy(tagStr)
+		time.sleep(0.5)
+		# вставить новую строку тегов
+		#inp.send_keys(Keys.CONTROL, 'v')
+		inp.send_keys(Keys.SHIFT, Keys.INSERT)
+		time.sleep(2)
+		# проверить длинну <div slot="description" id="tags-count" class="style-scope ytcp-video-metadata-basics">155/500</div>
+		tlen = 501
+		while tlen > 500:
+			# откорректировать длинну
+			tagslength = drv.find_element_by_id('tags-count')
+			#logging.info('tags-count: {}'.format(tagslength.text))
+			chcnt = tagslength.text.split('/')
+			#logging.info('tags-count: {}'.format(chcnt[0]))
+			tlen = int(chcnt[0])
+			if tlen > 500:
+				delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+				if len(delbtns) > 0:
+					delbtns[-1].click()
+	else:
+		logging.info('Нет слов для формирования строки тегов. Работаем с текущими')
+		# вставлять нечего, далее работаем с тем, что есть
+
 	# получить текущее состояние видео
+	time.sleep(1)
 	vidSEO2 = getYTseo4Vid(drv)
-	logging.info('seo2: {}'.format(vidSEO2))
+	logging.info('seo2: {}'.format(vidSEO2['treal']))
 	
-	#если рейтинг выше, то сохранить, иначе отменить
+	#если рейтинг выше, то сохранить
 	if vidSEO2['treal'] > vidSEO1['treal'] and (vidSEO1['tshow']<0.1 or vidSEO2['tshow'] > vidSEO1['tshow']):
-		logging.info('seo2 > seo1. It will be saved.')
+		logging.info('!!! {:05.2f} > {:05.2f} SAVE'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
 		# save this
 		svd = 1
-		if o.realsave=='1':
+		elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
+		if len(elms)>0:
+			elms[0].click()
+			time.sleep(0.5)
+	
+	# продолжаем улучшать, пробуем удалять по одному тегу, возможно найдем более высокое значение рейтинга
+	todo = True
+	fup = 0
+	fdown = 0
+	iteration = 0
+	vidSEOlast = vidSEO2.copy()
+	while todo and iteration < 100 and fdown < 1 and fup < 2:
+		iteration+=1
+		tlen = readTagsLen(drv)
+		if tlen > 0:
+			#пытаемся удалить последний тег
+			delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+			if len(delbtns) > 0:
+				parentelm = delbtns[-1].find_element_by_xpath("./..")
+				logging.info('удаляем тег: {}'.format(parentelm.get_attribute('vidiq-keyword')))
+				delbtns[-1].click()
+				time.sleep(2)
+
+		vidSEOcur = getYTseo4Vid(drv)
+
+		if ( vidSEOlast['treal'] > vidSEOcur['treal'] ): #and ( abs(vidSEOlast['tshow'] - vidSEOcur['tshow']) <0.1 ):
+			# уменьшился рейтинг после удаления тега - отменяем и завершаем подбор
+			fdown +=1
+			logging.info('--- {:05.2f} < {:05.2f} DISCARD'.format(float(vidSEOcur['treal']), float(vidSEOlast['treal'])))
+			vidSEOlast = vidSEOcur.copy()
+
+		elif ( vidSEOlast['treal'] < vidSEOcur['treal'] ):
+			# сохранить и продолжить удалять до следующего изменения
+			svd = 1
+			fup +=1
+			logging.info('!!! {:05.2f} > {:05.2f} SAVE {}'.format(float(vidSEOcur['treal']), float(vidSEOlast['treal']), fup))
 			elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
 			if len(elms)>0:
 				elms[0].click()
-		else:
-			btn=drv.find_element_by_id('discard')
-			btn.click()
-		time.sleep(0.5)
-	else:
+				time.sleep(0.5)
+			vidSEOlast = vidSEOcur.copy()
+
+	if fdown > 0:
 		# cancel
-		svd = 0
+		#logging.info(' :( discard, seo2 {:05.2f} =< {:05.2f} seo1.'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
 		btn=drv.find_element_by_id('discard')
 		btn.click()
-		time.sleep(0.5)
+		
 
-	# сохранить рейтинг
+	# сохранить рейтинг в БД
+	time.sleep(3)
+	vidSEO2 = getYTseo4Vid(drv)
+	if float(vidSEO2['treal']) > float(vidSEO1['treal']):
+		logging.info('!!! текущий seo: {:05.2f} > старого {:05.2f}'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+	elif float(vidSEO2['treal']) <= float(vidSEO1['treal']):
+		logging.info('текущий seo: {:05.2f} == старому {:05.2f}'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+	
 	saveSEOupdate(vid, [vidSEO1, vidSEO2], svd)
 
+def readTagsLen(drv):
+	tagslength = drv.find_element_by_id('tags-count')
+	chcnt = tagslength.text.split('/')
+	return int(chcnt[0])
+
+def readTagsCnt(drv):
+	return len(drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']"))
 
 def clearAlltags(drv, inp):
 	# clear all tags
@@ -325,12 +385,25 @@ def getDBTagSeo(vid, url, tag):
 			resseo = ts.seo
 	return resseo
 
-def getDBtags(vid, url):
+def getExtags(minV, avgV, maxV):
+	etags = []
+	with orm.db_session:
+		cnttags = orm.select(t.tag for t in TagSEO).count()
+		etags = [tg for tg in orm.select(t.tag for t in TagSEO if orm.min(t.seo) < minV and orm.avg(t.seo) < avgV and orm.max(t.seo) < maxV)]
+		logging.info('список слов исключений: {}/{}({:05.2f}%) шт. {}'.format(len(etags), cnttags, float(len(etags)*100.0/cnttags), etags))
+	return etags
+
+def getDBtags(vid, url, extags=[]):
 	restags = []
 	with orm.db_session:
+		# теги видео
 		tags=[t.tag for t in TagSEO.select(lambda t: t.url==url and t.vid==vid)]
+		# теги исключения
+		# extags
+		if extags is None:
+			extags = []
 		#logging.info(tags)
-		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag not in tags).order_by(orm.desc(TagSEO.seo)):
+		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag not in tags and ts.tag not in extags).order_by(orm.desc(TagSEO.seo)):
 			restags+=[tss.tag]
 		#logging.info(restags)
 	return restags
@@ -477,7 +550,9 @@ def rateWords(drv, opts):
 	inp = drv.find_element_by_id('text-input')
 	clearAlltags(drv, inp)
 	inp.click()
+	curw=0
 	for w in words:
+		curw+=1
 		inp.click()
 		if opts.clipboard=='1':
 			pyperclip.copy(w)
@@ -505,7 +580,7 @@ def rateWords(drv, opts):
 		#get SEO score
 		elm=drv.find_element_by_class_name('stat-value-seo-score')
 		elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
-		logging.info('{};{};{}'. format(w, elm1.text, sugText))
+		logging.info('{:03d}/{:03d} ;{:05.2f};{};{}'.format(curw, wordscnt, float(elm1.text), w, sugText))
 		delTag(drv)
 	discardChanges(drv)
 	newresfile = '!addwords_{}.txt'.format(datetime.datetime.now().strftime('%y%m%d_%H%M'))
@@ -522,7 +597,7 @@ if __name__ == '__main__':
 	parser.add_argument('--update', help='update new and zero tags', default='0')
 	# 0- сбор тегов для входных видео; 1-новые и с оценкой ноль теги добавить для проверки; 2-проверка тегов из других видео на seo под анализируемым видео
 	parser.add_argument('--clipboard', help='inserts tags by clipboard', default='1')
-	parser.add_argument('--realsave', help='save changes', default='0')
+	
 	parser.add_argument('--dt', help='expire datetime', default='2020-05-12 12:00')
 	parser.add_argument('--words', help='rate words on seo in infile', default='0')
 	args = parser.parse_args()
