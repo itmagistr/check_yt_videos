@@ -4,6 +4,8 @@ import argparse
 import time
 import datetime
 import pyperclip
+import googleapiclient.errors      #список ошибок доступа к YouTube Data API
+import googleapiclient.discovery   #клиент доступа к YouTube Data API
 from check_yt_models import *
 from pony import orm
 from selenium import webdriver
@@ -14,11 +16,17 @@ from selenium.common.exceptions import * #
 import logging
 logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
+logging.getLogger('googleapicliet.discovery_cache').setLevel(logging.CRITICAL)
 logging.getLogger().addHandler(logging.FileHandler("info_yt_vidtags.log"))
 
 
 
 def main(opts):
+	
+	if len(opts.chID) > 1:
+		getVideoList(opts) # сформировать файл ссылок на видео канала
+		return #выйти из выполнения
+
 	urls={}
 	with open(opts.infile, 'r') as fl:
 		for line in fl.readlines():
@@ -589,6 +597,73 @@ def rateWords(drv, opts):
 			flres.writelines([adw+'\n'])
 	exit(999)
 
+
+def getVideoList(opts):
+	# наименование сервиса Google
+	api_service_name = "youtube"
+	api_version = "v3"
+	youtube = googleapiclient.discovery.build(api_service_name, api_version, developerKey=opts.apiKey, cache_discovery=False)
+	
+	playlists=[]
+	npage = 1
+	tstr = ''
+	# step 2 - получить список плейлистов
+	######################################
+	request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID) 
+	response = request.execute()
+	playlists.extend(response["items"])
+	
+	while 'nextPageToken' in response and response["nextPageToken"]:
+		request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID, pageToken=response["nextPageToken"])
+		response = request.execute()
+		npage+=1
+		playlists.extend(response["items"])
+	#logging.info(playlists)
+	
+	plvideos = []
+	for pl in playlists:
+		npage = 1
+		request = youtube.playlistItems().list(
+			part="snippet", 
+			maxResults=50,
+			playlistId=pl["id"] # плейлист
+		)
+		response = request.execute()
+		totalResults = response["pageInfo"]["totalResults"]
+		
+		#logging.info(response['items'])
+		
+		for itm in response["items"]:
+			plvideos.extend([itm["snippet"]])
+		
+		while 'nextPageToken' in response:# and response["nextPageToken"] is not None:
+			npToken = response.get('nextPageToken','not Found')
+			
+			request = youtube.playlistItems().list(
+				part="snippet", # заменить на snippet 
+				maxResults=50,
+				pageToken=npToken,
+				playlistId=pl["id"] # плейлист
+			)
+			response = request.execute()
+			#logging.info(response['items'])
+			for itm in response["items"]:
+				plvideos.extend([itm["snippet"]]) # накапливаем список видео, обновляем характеристики видео, далее собираемтолько статистику
+	#plvideos["channelId"]
+	#plvideos["resourceId"]["videoId"]
+
+	with open(getFilename(opts), 'w') as fl:
+		# if opts.chvideos=='1':
+		# 	for v in plvideos:
+		# 		if v["channelId"] == opts.chID:
+		# 			fl.writelines(['{};https://youtube.com/watch?v={}\n'.format(v["channelId"], v["resourceId"]["videoId"])])
+		# else:
+			fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
+
+def getFilename(opts):
+	res='{}_{}.txt'.format(opts.outflname, datetime.datetime.now().strftime('%y%m%d_%H%M'))
+	return res
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--timeout', help='waiting timeout to load the page', default='10')
@@ -600,6 +675,11 @@ if __name__ == '__main__':
 	
 	parser.add_argument('--dt', help='expire datetime', default='2020-05-12 12:00')
 	parser.add_argument('--words', help='rate words on seo in infile', default='0')
+	
+	parser.add_argument('--chID', help='channel ID', default='-')
+	parser.add_argument('--chvideos', help='only channels videos', default='0')
+	parser.add_argument('--outflname', help='part of the filename', default='chvideos')
+	parser.add_argument('--apiKey', help='google api key', default='-')
 	args = parser.parse_args()
 	main(args)
 
