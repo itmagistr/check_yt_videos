@@ -651,6 +651,12 @@ def getVideoList(opts):
 				plvideos.extend([itm["snippet"]]) # накапливаем список видео, обновляем характеристики видео, далее собираемтолько статистику
 	#plvideos["channelId"]
 	#plvideos["resourceId"]["videoId"]
+	yturls=[]
+	if len(opts.infile)>1:
+		with open(opts.infile, 'r') as infl:
+			for line in infl.readlines():
+				if 'youtube.com' in line:
+					yturls.append(line.strip())
 
 	with open(getFilename(opts), 'w') as fl:
 		# if opts.chvideos=='1':
@@ -658,6 +664,12 @@ def getVideoList(opts):
 		# 		if v["channelId"] == opts.chID:
 		# 			fl.writelines(['{};https://youtube.com/watch?v={}\n'.format(v["channelId"], v["resourceId"]["videoId"])])
 		# else:
+		if len(yturls) > 0:
+			for v in plvideos:
+				url = 'https://youtube.com/watch?v={}'.format(v["resourceId"]["videoId"])
+				if url not in yturls:
+					fl.writelines([url+'\n'])
+		else:
 			fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
 
 def getFilename(opts):
@@ -667,7 +679,7 @@ def getFilename(opts):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--timeout', help='waiting timeout to load the page', default='10')
-	parser.add_argument('--infile', help='input file xlsm', default='listurls.txt')
+	parser.add_argument('--infile', help='input file xlsm', default='_')
 	parser.add_argument('--webdriver', help='web driver path', default='C:\\bin\\webdriver\\chromedriver')
 	parser.add_argument('--update', help='update new and zero tags', default='0')
 	# 0- сбор тегов для входных видео; 1-новые и с оценкой ноль теги добавить для проверки; 2-проверка тегов из других видео на seo под анализируемым видео
