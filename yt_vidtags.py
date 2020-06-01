@@ -703,10 +703,10 @@ def tags_openxls(flname):
 	else:
 		logging.info('destination worksheet did not find')
 		exit(3)
-	if 'Исключения' in wb.sheetnames:
-		wse = wb['Исключения']
-	else:
-		logging.info('exclusions worksheet did not find')
+	# if 'Исключения' in wb.sheetnames:
+	# 	wse = wb['Исключения']
+	# else:
+	# 	logging.info('exclusions worksheet did not find')
 	if 'Теги' in wb.sheetnames:
 		wst= wb['Теги']
 	else:
@@ -714,7 +714,8 @@ def tags_openxls(flname):
 
 	newWBfile = '{}\\Ссылки_{}.xlsm'.format(os.path.dirname(flname), datetime.datetime.now().strftime('%y%m%d_%H%M'))
 	logging.info(newWBfile)
-	return (wb, wss, wsd, wse, wst, newWBfile)
+	#return (wb, wss, wsd, wse, wst, newWBfile)
+	return (wb, wss, wsd, wst, newWBfile)
 	
 	
 	
@@ -722,11 +723,12 @@ def tags_openxls(flname):
 def check_list(opts):
 	started_at = time.monotonic()
 	#if opts.tags == '0':  обновление статистики чек-листа
-	(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
-	
-	urls = tags_getUrls(wss, wse)
+	#(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
+	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
+
+	urls = tags_getUrls(wss, opts.owner)
 	urlslen = len(urls)
-	logging.info('----------urls len {}, {}'.format(urlslen, repr(urls[0])))
+	logging.info(f'---------- Очередь для обработки {urlslen} ссылок')
 
 	odt = datetime.datetime.strptime(opts.dt, '%Y-%m-%d %H:%M')
 	logging.info('---- дата свежести сохранненых данных {}'.format(odt))
@@ -883,7 +885,7 @@ def set_tags(opts):
 	(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
 
 	print('------------------tags')
-	urltags = tags_getUrlsTags(wss, wse, wst)
+	urltags = tags_getUrlsTags(wss, opts.owner, wst)
 	print('------------------urls count ', len(urltags))
 	#logging.info('key:{}, title:{}, tags:{}'.format(urltags[0]['key'], urltags[0]['title'], urltags[0]['tags']))
 	crow=1
@@ -982,32 +984,34 @@ def set_tags(opts):
 	logging.info('Работа сценария завершена за {:.3f} сек.'.format(time.monotonic() - started_at))
 	return
 
-def tags_getUrls(ws, wse):
-	exurls = []
+def tags_getUrls(ws, owner): #wse):
+	#exurls = []
 	urls=[]
+	# doit = True
+	# r = 1
+	# emptyrows = 0
+	# # сформировать список исключений
+	# while doit:# and r < 3: #для анализа всего экселя требуется оставить только doit
+	# 	r+=1
+	# 	curval = wse.cell(row=r, column=6).value
+	# 	if curval is not None:
+	# 		if 'youtube.com' in curval:
+	# 			exurls+=[curval]
+	# 	else:
+	# 		emptyrows+=1
+	# 	if emptyrows > 3:
+	# 		doit = False
+	
+	# прочитать ссылки на ютюб для сбора информации по чек-лист
 	doit = True
 	r = 1
 	emptyrows = 0
-	# сформировать список исключений
 	while doit:# and r < 3: #для анализа всего экселя требуется оставить только doit
 		r+=1
-		curval = wse.cell(row=r, column=6).value
+		curval = ws.cell(row=r, column=6).value # link
+		curown = ws.cell(row=r, column=4).value # owner
 		if curval is not None:
-			if 'youtube.com' in curval:
-				exurls+=[curval]
-		else:
-			emptyrows+=1
-		if emptyrows > 3:
-			doit = False
-	# прочитать ссылки на ютюб для сбора информации по чег-лист
-	doit = True
-	r = 1
-	emptyrows = 0
-	while doit:# and r < 3: #для анализа всего экселя требуется оставить только doit
-		r+=1
-		curval = ws.cell(row=r, column=6).value
-		if curval is not None:
-			if ('youtube.com' in curval) and (not curval in exurls):
+			if ('youtube.com' in curval) and (curown == owner): #(not curval in exurls):
 				url = curval.replace('https://youtube.com/watch?v=', 'https://studio.youtube.com/video/')+'/edit'
 				logging.info(url)
 				urls+=[{'url': url, 'num': ws.cell(row=r, column=1).value, 'title': ws.cell(row=r, column=5).value}]
@@ -1017,25 +1021,25 @@ def tags_getUrls(ws, wse):
 			doit = False
 	return urls
 
-def tags_getUrlsTags(ws, wse, wst):
+def tags_getUrlsTags(ws, owner, wst): #wse, 
 	titlemask = {} # маски названий
-	exurls = [] # исключения
+	#exurls = [] # исключения
 	urls=[] # видео
 
-	doit = True
-	r = 1
-	emptyrows = 0
-	# сформировать список исключений
-	while doit:# and r < 3: #для анализа всего экселя требуется оставить только doit
-		r+=1
-		curval = wse.cell(row=r, column=6).value
-		if curval is not None:
-			if 'youtube.com' in curval:
-				exurls+=[curval]
-		else:
-			emptyrows+=1
-		if emptyrows > 3:
-			doit = False
+	# doit = True
+	# r = 1
+	# emptyrows = 0
+	# # сформировать список исключений
+	# while doit:# and r < 3: #для анализа всего экселя требуется оставить только doit
+	# 	r+=1
+	# 	curval = wse.cell(row=r, column=6).value
+	# 	if curval is not None:
+	# 		if 'youtube.com' in curval:
+	# 			exurls+=[curval]
+	# 	else:
+	# 		emptyrows+=1
+	# 	if emptyrows > 3:
+	# 		doit = False
 	
 	
 	doit = True
@@ -1062,8 +1066,9 @@ def tags_getUrlsTags(ws, wse, wst):
 		r+=1
 		curval = ws.cell(row=r, column=6).value
 		title = ws.cell(row=r, column=5).value
+		curown = ws.cell(row=r, column=4).value
 		if curval is not None and title is not None:
-			if ('youtube.com' in curval) and (not curval in exurls):
+			if ('youtube.com' in curval) and (curown == owner): # (not curval in exurls):
 				for k in titlemask.keys():
 					if k in title:
 						url = curval.replace('https://youtube.com/watch?v=', 'https://studio.youtube.com/video/')+'/edit'
@@ -1146,6 +1151,7 @@ if __name__ == '__main__':
 	parser.add_argument('--apiKey', help='google api key', default='-')
 	parser.add_argument('--tags', help='expire datetime', default='-')
 	parser.add_argument('--seo',help='seo to process', default='50')
+	parser.add_argument('--owner',help='owner of videos', default='Олег Брагинский')
 	args = parser.parse_args()
 	if args.tags:
 		if args.tags == '0':
