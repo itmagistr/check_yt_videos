@@ -712,7 +712,8 @@ def tags_openxls(flname):
 	else:
 		logging.info('tags worksheet did not find')
 
-	newWBfile = '{}\\Ссылки_{}.xlsm'.format(os.path.dirname(flname), datetime.datetime.now().strftime('%y%m%d_%H%M'))
+	#newWBfile = '{}\\Ссылки_{}.xlsm'.format(os.path.dirname(flname), datetime.datetime.now().strftime('%y%m%d_%H%M'))
+	newWBfile = 'Ссылки_{}.xlsm'.format(datetime.datetime.now().strftime('%y%m%d_%H%M'))
 	logging.info(newWBfile)
 	#return (wb, wss, wsd, wse, wst, newWBfile)
 	return (wb, wss, wsd, wst, newWBfile)
@@ -725,7 +726,7 @@ def check_list(opts):
 	#if opts.tags == '0':  обновление статистики чек-листа
 	#(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
 	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
-
+	tags_clearStatSheet(opts, wsd)
 	urls = tags_getUrls(wss, opts.owner)
 	urlslen = len(urls)
 	logging.info(f'---------- Очередь для обработки {urlslen} ссылок')
@@ -882,7 +883,8 @@ def check_list(opts):
 def set_tags(opts):
 	started_at = time.monotonic()
 	#if opts.tags == '1': #подставляем теги
-	(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
+	#(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
+	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
 
 	print('------------------tags')
 	urltags = tags_getUrlsTags(wss, opts.owner, wst)
@@ -1132,6 +1134,19 @@ def tags_discardChanges(drv, wt=0.5):
 		time.sleep(wt)
 	except:
 		pass
+def tags_clearStatSheet(opts, wsd):
+	crow = 1
+	emptyrows = 0
+	todo = True
+	while todo and emptyrows < 3:
+		crow+=1
+		if not wsd.cell(row=crow, column=4).value is None:
+			for n in range(1,23):
+				wsd.cell(row=crow, column=n).value = None
+		else:
+			emptyrows+=1
+
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -1161,4 +1176,4 @@ if __name__ == '__main__':
 	else:
 		main(args)
 
-	# cmd line yt_vidtags.exe --timeout=12 --webdriver="C:\Windows\chromedriver.exe" --infile="!in.txt"
+	# cmd line python yt_optima.py --timeout=12 --webdriver="C:\Windows\chromedriver.exe" --infile="!in.txt"
