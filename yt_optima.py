@@ -72,7 +72,7 @@ def main(opts):
 
 			elif opts.update in '0124': #режим 0, 1, 2, 4
 				driver.get(u)
-				time.sleep(2)
+				time.sleep(1) # пауза 2 при заходе на очередное видео
 				try:
 					testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 				except TimeoutException:
@@ -143,7 +143,7 @@ def main(opts):
 						elq.send_keys(Keys.SHIFT, Keys.INSERT)
 					else:
 						elq.send_keys(t, Keys.ENTER)
-					time.sleep(3)
+					time.sleep(2.5) # пауза 3 для обновления значения VidIQ
 
 					#get SEO score
 					elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -153,7 +153,7 @@ def main(opts):
 					
 					if cdata[t]['seo'] < 0.01:
 						# если не успело значение обновиться, то подождем еще и вычитаем повторно
-						time.sleep(2)
+						time.sleep(1.5) # 2 пауза второго шанса обновления значения VidIQ
 						#get SEO score
 						elm=driver.find_element_by_class_name('stat-value-seo-score')
 						elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -198,8 +198,8 @@ def connect2Browser(opts):
 	chrome_options = Options()
 	chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222") # запустить предварительно Хром
 	drv = webdriver.Chrome(opts.webdriver, options=chrome_options)
-	time.sleep(3)
-	drv.set_page_load_timeout(120)
+	time.sleep(2) # пауза 3 при подключении к браузеру
+	drv.set_page_load_timeout(30)
 	drv.implicitly_wait(10)
 	drv.maximize_window()
 	discardChanges(drv,2) #если при запуске есть не сохраненные изменения, то отменяем перед началом перехода по ссылке
@@ -239,7 +239,7 @@ def loadUrls(flname):
 def tagsUpdate(drv, vid, url, o):
 	svd = 0 # не привело к сохранению в видео ютюб
 	drv.get(url)
-	time.sleep(2)
+	time.sleep(1) # пауза 2
 	try:
 		testElm = WebDriverWait(drv, float(o.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 	except TimeoutException:
@@ -353,7 +353,7 @@ def tagsUpdate(drv, vid, url, o):
 		
 
 	# сохранить рейтинг в БД
-	time.sleep(3)
+	time.sleep(3) #пауза 3
 	vidSEO2 = getYTseo4Vid(drv)
 	if float(vidSEO2['treal']) > float(vidSEO1['treal']):
 		logging.info('!!! текущий seo: {:05.2f} > старого {:05.2f}, show2: {}, show1: {}'.format(float(vidSEO2['treal']), float(vidSEO1['treal']), vidSEO2['tshow'], vidSEO1['tshow']))
@@ -633,7 +633,7 @@ def rateWords(drv, opts):
 	logging.info('Перехожу по ссылке: {}'.format(url))
 	#discardChanges(drv,1)
 	drv.get(url)
-	time.sleep(3)
+	time.sleep(1)  # пауза 3
 	try:
 		testElm = WebDriverWait(drv, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 	except TimeoutException:
@@ -653,7 +653,7 @@ def rateWords(drv, opts):
 			inp.send_keys(Keys.SHIFT, Keys.INSERT)
 		else:
 			inp.send_keys(w+',',Keys.ENTER)
-		time.sleep(3)
+		time.sleep(2) # пауза 3
 		# подождать появления подсказок
 		sugText=''
 		try:
@@ -1024,7 +1024,7 @@ def set_tags(opts):
 				pyperclip.copy(u['taginfo']['newtags'])
 				time.sleep(0.5)
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
-				time.sleep(3)
+				time.sleep(2.5) # пауза 3
 
 				#get SEO score
 				elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -1034,7 +1034,7 @@ def set_tags(opts):
 				
 				if cdata['seo2'] < 0.01:
 					# если не успело значение обновиться, то подождем еще и вычитаем повторно
-					time.sleep(2)
+					time.sleep(1.5) # пауза 2
 					#get SEO score
 					elm=driver.find_element_by_class_name('stat-value-seo-score')
 					elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -1300,7 +1300,7 @@ def addAndEstimate(opts):
 		checkPauseKey() # key p
 		cdata = {}
 		driver.get(cururl)
-		time.sleep(2)
+		time.sleep(1) # пауза 2
 		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
 		tagslen = len(tags)
 		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
@@ -1348,7 +1348,7 @@ def addAndEstimate(opts):
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
 			else:
 				elq.send_keys(t, Keys.ENTER)
-			time.sleep(3)
+			time.sleep(2.5) # пауза 3
 
 			#get SEO score
 			elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -1358,7 +1358,7 @@ def addAndEstimate(opts):
 			
 			if cdata[t]['seo'] < 0.01:
 				# если не успело значение обновиться, то подождем еще и вычитаем повторно
-				time.sleep(2)
+				time.sleep(1.5) # пауза 2
 				#get SEO score
 				elm=driver.find_element_by_class_name('stat-value-seo-score')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -1423,37 +1423,35 @@ def importTags(opts):
 		logging.info(f'{indx:03d}/{urlslen:03d} открытие страницы {vid} видео {cururl}')
 		checkPauseKey() # key p
 		cdata = {}
-		
+		driver.get(cururl)
+		time.sleep(1) # пауза 2
 		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
 		tagslen = len(tags)
 		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
-		if tagslen > 0:
-			driver.get(cururl)
-			time.sleep(2)
-			try:
-				testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
-			except TimeoutException:
-				logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
-				continue
+		try:
+			testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+		except TimeoutException:
+			logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+			continue
 				
-			inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
-			vid_title = inpts[0].text
-			logging.info(f'Наименование видео {vid_title}')
-			# добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
-			elq = driver.find_element_by_id('text-input')
-			elq.click()
-			# #clear all tags
-			doit_clear=2
-			while doit_clear>0:
-				try:
-					di = driver.find_element_by_id('clear-button')
-					di.click()
-					doit_clear=0
-				except:
-					logging.info("find_element_by_id('clear-button') Unexpected error: {}, {}, {}".format(sys.exc_info()[0], sys.exc_info()[1], traceback.format_exc()))
-					elq.send_keys('wr1,wr2', Keys.ENTER)
-					time.sleep(0.5)
-					doit_clear-=1
+		inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
+		vid_title = inpts[0].text
+		logging.info(f'Наименование видео {vid_title}')
+		# добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
+		elq = driver.find_element_by_id('text-input')
+		elq.click()
+		# #clear all tags
+		doit_clear=2
+		while doit_clear>0:
+			try:
+				di = driver.find_element_by_id('clear-button')
+				di.click()
+				doit_clear=0
+			except:
+				logging.info("find_element_by_id('clear-button') Unexpected error: {}, {}, {}".format(sys.exc_info()[0], sys.exc_info()[1], traceback.format_exc()))
+				elq.send_keys('wr1,wr2', Keys.ENTER)
+				time.sleep(0.5)
+				doit_clear-=1
 
 		# по тегам сохранить рейтинг
 		tagscnt=tagslen
@@ -1474,7 +1472,7 @@ def importTags(opts):
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
 			else:
 				elq.send_keys(t, Keys.ENTER)
-			time.sleep(3)
+			time.sleep(2.5) # пауза 3
 
 			#get SEO score
 			elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -1484,7 +1482,7 @@ def importTags(opts):
 			
 			if cdata[t]['seo'] < 0.01:
 				# если не успело значение обновиться, то подождем еще и вычитаем повторно
-				time.sleep(2)
+				time.sleep(1.5) # пауза 2
 				#get SEO score
 				elm=driver.find_element_by_class_name('stat-value-seo-score')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -1606,7 +1604,7 @@ def saveAnalytPg(opts):
 		crow+=1
 		#logging.info(u['url'])
 		driver.get(u['url'])
-		time.sleep(2)
+		time.sleep(1) # пауза 2
 		try:
 			testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_xpath('//h1[@class="page-title style-scope ytcp-app"][1]'))
 		except TimeoutException:
