@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+import msvcrt
+import statistics
+import traceback
 import argparse
+from pathlib import Path
 import time
 import datetime
 import openpyxl
@@ -19,19 +23,27 @@ import logging
 logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger('googleapicliet.discovery_cache').setLevel(logging.CRITICAL)
-logging.getLogger().addHandler(logging.FileHandler("info_yt_vidtags.log"))
+logging.getLogger().addHandler(logging.FileHandler("yt_optima.log"))
 
+FLTYPE={'Обзор': {'litera': 'ov',},
+		'Просмотры': {'litera': 'v',},
+		'Взаимодействие': {'litera': 'iact',},
+		'Аудитория': {'litera': 'aud',},
+		}
 
 def main(opts):
-	
+	logging.info(f'Начало работы главного модуля')
 	if len(opts.chID) > 1:
+		logging.info(f'Начало формирования списка видео канала {opts.chID}')
 		getVideoList(opts) # сформировать файл ссылок на видео канала
+
 		return #выйти из выполнения
 
 	urls=loadUrls(opts.infile)
 	urlslen = len(urls.keys())
 	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
-	
+	addTags = loadTags(opts.addtags)
+	logging.info('Подготовлено {} тегов для анализа'.format(len(addTags)))
 	driver = connect2Browser(opts)
 
 	if opts.words=='1':
@@ -44,7 +56,9 @@ def main(opts):
 		crow=0
 		for i, u in urls.items():
 			crow+=1
+			exitOnKey() # key q
 			logging.info('-------- Обработка {:03d} из {:03d} ({:06.2f} %), {}'.format(crow, urlslen, 100.00*crow/urlslen, u))
+			checkPauseKey() # key p
 			cdata = {}
 			
 			if opts.update == '3':
@@ -56,7 +70,7 @@ def main(opts):
 				else:
 					tagsUpdate(driver, i, u, opts)
 
-			elif opts.update in '012': #режим 0, 1, 2
+			elif opts.update in '0124': #режим 0, 1, 2, 4
 				driver.get(u)
 				time.sleep(2)
 				try:
@@ -65,10 +79,22 @@ def main(opts):
 					logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
 					continue
 				
+				inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
+				vid_title = inpts[0].text
+				
 				if opts.update == '2':
-						# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
-						for t in getDBtags(i, u, excludeTags):
-							cdata[t]={}
+					# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
+					for t in getDBtags(i, u, excludeTags):
+						cdata[t]={}
+				elif opts.update == '4':
+					# для видео добавить теги, которые входят в название и еще не проверялись под данным видео
+					inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
+					vid_title = inpts[0].text
+					cnt = 0
+					for t in getTitleTags(i, u, vid_title, addTags):
+						cdata[t]={}
+						cnt+=1
+					logging.info(f'тегов {cnt} для оценки с учетом названия "{vid_title}"')
 				elif opts.update in '01': #режим 0 или 1
 					#собрать теги
 					for elm in driver.find_elements_by_xpath("//*[@id='child-input']//ytcp-chip[@role='button']"):
@@ -147,17 +173,25 @@ def main(opts):
 						logging.info("ERROR: {}".format(sys.exc_info()[0]))
 						
 
+					
+					
+					if cdata[t]['ranked'] > 0:
+						# если тег ранжированный, то к оценке добавим 0.01
+						cdata[t]['seo'] += 0.01
+					if t.upper() in vid_title.upper():
+						# если тег входит в строку названия, то к оценке добавим 0.02
+						cdata[t]['seo'] += 0.02
+					saveindb({'vid': i, 'url': u, 'tags': {t: cdata[t]}, })
 					logging.info('{:03d}/{:03d}, {:03d} {}->{}'.format(crow, urlslen, tagscnt, t, cdata[t]['seo']))
-					if opts.update=='2':
-						saveindb({'vid': i, 'url': u, 'tags': {t: cdata[t]}, })
-				
+					checkPauseKey()
+
 				#logging.info('cancel changes')
 				btn=driver.find_element_by_id('discard')
 				btn.click()
 				time.sleep(0.5)
 
-				if opts.update!='2':
-					saveindb({'vid': i, 'url': u, 'tags': cdata})
+				# if opts.update!='2':
+				# 	saveindb({'vid': i, 'url': u, 'tags': cdata})
 			
 def connect2Browser(opts):
 	logging.info('Попытка подключиться к браузеру 127.0.0.1:9222 ...')
@@ -178,6 +212,17 @@ def connect2Browser(opts):
 		logging.info("Выполните вход в аккаунт ютюб и перезапустите приложение.")
 		exit(13)
 	return drv
+
+def getVID(strline):
+	vid = '-'
+	url = '-'
+	if 'youtube.com' in strline:
+		if strline.strip()[-5:]=='/edit':
+			vid = strline.strip()[-16:-5]
+		else:
+			vid = strline.strip()[-11:]
+		url='https://studio.youtube.com/video/{}/edit'.format(vid)
+	return (vid, url)
 
 def loadUrls(flname):
 	res = {}
@@ -205,7 +250,7 @@ def tagsUpdate(drv, vid, url, o):
 
 	# сохранить текущее состояние видео
 	vidSEO1 = getYTseo4Vid(drv)
-	logging.info('seo1: {}'.format(vidSEO1['treal']))
+	logging.info('seo1: {}, real: {}, show: {}'.format(vidSEO1['seo'], vidSEO1['treal'], vidSEO1['tshow']))
 	
 	if len(ntags) > 0:
 		logging.info('{} слов для формирования строки тегов'.format(len(ntags)))
@@ -250,11 +295,11 @@ def tagsUpdate(drv, vid, url, o):
 	# получить текущее состояние видео
 	time.sleep(1)
 	vidSEO2 = getYTseo4Vid(drv)
-	logging.info('seo2: {}'.format(vidSEO2['treal']))
+	logging.info('seo2: {}, real2: {}, show2: {}'.format(vidSEO2['seo'], vidSEO2['treal'], vidSEO2['tshow']))
 	
 	#если рейтинг выше, то сохранить
-	if vidSEO2['treal'] > vidSEO1['treal'] and (vidSEO1['tshow']<0.1 or vidSEO2['tshow'] > vidSEO1['tshow']):
-		logging.info('!!! {:05.2f} > {:05.2f} SAVE'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+	if (vidSEO2['treal'] > 49.99) or ((vidSEO2['treal'] > vidSEO1['treal']) and (vidSEO1['tshow']<0.1 or vidSEO2['tshow'] > vidSEO1['tshow'])):
+		logging.info('!!! {:05.2f} >= {:05.2f} SAVE, seo2: {}, seo1: {}, show2: {}, show1: {}'.format(float(vidSEO2['treal']), float(vidSEO1['treal']), vidSEO2['seo'], vidSEO1['seo'], vidSEO2['tshow'], vidSEO1['tshow']))
 		# save this
 		svd = 1
 		elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
@@ -263,7 +308,7 @@ def tagsUpdate(drv, vid, url, o):
 			time.sleep(0.5)
 	
 	# продолжаем улучшать, пробуем удалять по одному тегу, возможно найдем более высокое значение рейтинга
-	todo = True
+	todo = True if vidSEO2['treal'] < 50 else False
 	fup = 0
 	fdown = 0
 	iteration = 0
@@ -288,7 +333,7 @@ def tagsUpdate(drv, vid, url, o):
 			logging.info('--- {:05.2f} < {:05.2f} DISCARD'.format(float(vidSEOcur['treal']), float(vidSEOlast['treal'])))
 			vidSEOlast = vidSEOcur.copy()
 
-		elif ( vidSEOlast['treal'] < vidSEOcur['treal'] ):
+		elif ( vidSEOlast['treal'] < vidSEOcur['treal']) and (vidSEO1['treal'] <= vidSEOcur['treal']):
 			# сохранить и продолжить удалять до следующего изменения
 			svd = 1
 			fup +=1
@@ -297,6 +342,7 @@ def tagsUpdate(drv, vid, url, o):
 			if len(elms)>0:
 				elms[0].click()
 				time.sleep(0.5)
+			todo = True if vidSEOcur['treal'] < 50 else False
 			vidSEOlast = vidSEOcur.copy()
 
 	if fdown > 0:
@@ -310,9 +356,9 @@ def tagsUpdate(drv, vid, url, o):
 	time.sleep(3)
 	vidSEO2 = getYTseo4Vid(drv)
 	if float(vidSEO2['treal']) > float(vidSEO1['treal']):
-		logging.info('!!! текущий seo: {:05.2f} > старого {:05.2f}'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+		logging.info('!!! текущий seo: {:05.2f} > старого {:05.2f}, show2: {}, show1: {}'.format(float(vidSEO2['treal']), float(vidSEO1['treal']), vidSEO2['tshow'], vidSEO1['tshow']))
 	elif float(vidSEO2['treal']) <= float(vidSEO1['treal']):
-		logging.info('текущий seo: {:05.2f} == старому {:05.2f}'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+		logging.info('текущий seo: {:05.2f} <= старому {:05.2f}'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
 	
 	saveSEOupdate(vid, [vidSEO1, vidSEO2], svd)
 
@@ -392,7 +438,7 @@ def saveSEOupdate(vid, vdata, saved):
 def getSEOtags(vid):
 	tgs=[]
 	with orm.db_session:
-		for tg in TagSEO.select(lambda t: t.vid==vid).order_by(orm.desc(TagSEO.seo)):
+		for tg in TagSEO.select(lambda t: t.vid==vid).order_by(orm.raw_sql('seo desc, length(tag)')):
 			#if tg.tag not in tgs:
 			tgs+=[tg.tag]
 	return tgs
@@ -426,6 +472,24 @@ def getDBtags(vid, url, extags=[]):
 		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag not in tags and ts.tag not in extags).order_by(orm.desc(TagSEO.seo)):
 			restags+=[tss.tag]
 		#logging.info(restags)
+	return restags
+
+def getTitleTags(vid, url, title, addtags=[]):
+	restags = []
+	ats = []
+	loctitle = title.lower()
+	with orm.db_session:
+		# теги видео
+		tags = [t.tag for t in TagSEO.select(lambda t: t.url==url and t.vid==vid)]
+		for t in addtags:
+			if t not in tags:
+				ats.append(t)
+		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag not in tags and ts.tag in loctitle and ts.tag not in addtags).order_by(orm.desc(TagSEO.seo)):
+			restags+=[tss.tag]
+		#logging.info(restags)
+		for t in ats:
+			if t not in restags:
+				restags.append(t)
 	return restags
 
 def getScores(dr, tdata):
@@ -498,6 +562,15 @@ def getYTseo4Vid(drv):
 		text = elm.get_attribute('vidiq-keyword')
 		tags+=[text]
 	
+	#get SEO score
+	seo=-1
+	elm=drv.find_element_by_class_name('stat-value-seo-score')
+	try:
+		elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+		seo = float(elm1.text)
+	except:
+		logging.info("stat-value-seo-score Unexpected error: {}".format(sys.exc_info()[0]))
+
 	# собрать рейтинги
 	elms=drv.find_elements_by_class_name('stat-value-undefined')
 	elm1 = elms[0].find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -522,7 +595,7 @@ def getYTseo4Vid(drv):
 		logging.info("stat-value-high-volume-ranked-tags Unexpected error: {}".format(sys.exc_info()[0]))
 
 
-	return {'tags': tags, 'treal': tr, 'tshow': tsh, 'tranked': tranked, 'thivolume': thivolume, }
+	return {'tags': tags, 'treal': tr, 'tshow': tsh, 'tranked': tranked, 'thivolume': thivolume, 'seo': seo}
 
 def CheckSavedData(vid, dt):
 	cdjson = None
@@ -669,8 +742,8 @@ def getVideoList(opts):
 			for line in infl.readlines():
 				if 'youtube.com' in line:
 					yturls.append(line.strip())
-
-	with open(getFilename(opts), 'w') as fl:
+	res = getFilename(opts)
+	with open(res, 'w') as fl:
 		# if opts.chvideos=='1':
 		# 	for v in plvideos:
 		# 		if v["channelId"] == opts.chID:
@@ -683,6 +756,7 @@ def getVideoList(opts):
 					fl.writelines([url+'\n'])
 		else:
 			fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
+	return res
 
 def getFilename(opts):
 	res='{}_{}.txt'.format(opts.outflname, datetime.datetime.now().strftime('%y%m%d_%H%M'))
@@ -714,7 +788,7 @@ def tags_openxls(flname):
 
 	#newWBfile = '{}\\Ссылки_{}.xlsm'.format(os.path.dirname(flname), datetime.datetime.now().strftime('%y%m%d_%H%M'))
 	newWBfile = 'Ссылки_{}.xlsm'.format(datetime.datetime.now().strftime('%y%m%d_%H%M'))
-	logging.info(newWBfile)
+	#logging.info(newWBfile)
 	#return (wb, wss, wsd, wse, wst, newWBfile)
 	return (wb, wss, wsd, wst, newWBfile)
 	
@@ -788,7 +862,7 @@ def check_list(opts):
 
 			elm1 = elms[1].find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			#logging.info('undefined {}'.format(elm1.text))
-			wsd.cell(row=crow, column=11, value=int(elm1.text))
+			wsd.cell(row=crow, column=11, value=float(elm1.text))
 			cdata['stat-value2'] = elm1.text
 
 			#get stat-value-tag-count
@@ -1083,6 +1157,60 @@ def tags_getUrlsTags(ws, owner, wst): #wse,
 
 	return urls
 
+def anl_getVUrls(ws, owner):  
+	urls=[] # видео
+	# прочитать ссылки на ютюб для установки тегов
+	doit = True
+	r = 1
+	emptyrows = 0
+	while doit:# and r < 3: #для анализа всего экселя требуется оставить только doit
+		r+=1
+		curval = ws.cell(row=r, column=6).value
+		title = ws.cell(row=r, column=5).value
+		curown = ws.cell(row=r, column=4).value
+		if curval is not None and title is not None:
+			if ('youtube.com' in curval) and (curown == owner): # (not curval in exurls):
+				#logging.info(curval)
+				vID = curval.split('=')[-1]
+				#logging.info(vID)
+				url = curval.replace('https://youtube.com/watch?v=', 'https://studio.youtube.com/video/')+'/analytics/tab-overview/period-lifetime'
+				#https://studio.youtube.com/video/i09vBTTHYOg/analytics/tab-overview/period-since_publish
+				#logging.info(url)
+				urls+=[{'url': url, 'num': ws.cell(row=r, column=1).value, 'title': ws.cell(row=r, column=5).value, 'videoId': vID}]
+		else:
+			emptyrows+=1
+		if emptyrows > 3:
+			doit = False
+	return urls
+
+def getVidTags4Import(indt):
+	viddata = {}
+	cnt_tags = 0
+	lasturl = '-'
+	vid = '-'
+	url = '-'
+	odt = datetime.datetime.strptime(indt, '%Y-%m-%d %H:%M')
+	with orm.db_session:
+		vidtags = TagImport.select().order_by(TagImport.url)
+		for vt in vidtags:
+			if vt.url == lasturl:
+				viddata[vid]['tags'].append(vt.tag)
+			else:
+				(vid, url) = getVID(vt.url)
+				viddata[vid]={'url': url, 'tags': [vt.tag]}
+			cnt_tags+=1
+	return (viddata, cnt_tags)
+
+def getNewTags4Vid(curl, alltags, indt):
+	odt = datetime.datetime.strptime(indt, '%Y-%m-%d %H:%M')
+	restags = []
+	with orm.db_session:
+		vidTags = [ts.tag for ts in TagSEO.select(lambda x: x.url==curl and x.dt > odt).order_by(TagSEO.tag)]
+	for t in alltags:
+		if t not in vidTags:
+			restags.append(t)
+	return restags
+
 def tags_CheckSavedData(url, dt):
 	cdjson = None
 	with orm.db_session:
@@ -1146,7 +1274,407 @@ def tags_clearStatSheet(opts, wsd):
 		else:
 			emptyrows+=1
 
+def loadTags(flname):
+	restags=[]
+	if os.path.exists(flname):
+		with open(flname, 'r', encoding='utf-8') as fl:
+			restags = [l.strip() for l in fl.readlines()]
+	return restags
 
+def addAndEstimate(opts):
+	logging.info(f'Загрузка списка видео из файла {opts.infile}')
+	urls=loadUrls(opts.infile)
+	urlslen = len(urls.keys())
+	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
+	tagsIN=loadTags(opts.addtags)
+	tagslen = len(tagsIN)
+	logging.info('Подготовлено {} тегов для анализа'.format(tagslen))
+	
+	driver = connect2Browser(opts)
+	indx = 0
+	# проход по видео
+	for vid, cururl in urls.items():
+		indx+=1
+		exitOnKey()
+		logging.info(f'{indx:03d}/{urlslen:03d} открытие страницы {vid} видео {cururl}')
+		checkPauseKey() # key p
+		cdata = {}
+		driver.get(cururl)
+		time.sleep(2)
+		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
+		tagslen = len(tags)
+		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
+		try:
+			testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+		except TimeoutException:
+			logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+			continue
+				
+		inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
+		vid_title = inpts[0].text
+		logging.info(f'Наименование видео {vid_title}')
+		# добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
+		elq = driver.find_element_by_id('text-input')
+		elq.click()
+		# #clear all tags
+		doit_clear=2
+		while doit_clear>0:
+			try:
+				di = driver.find_element_by_id('clear-button')
+				di.click()
+				doit_clear=0
+			except:
+				logging.info("find_element_by_id('clear-button') Unexpected error: {}, {}, {}".format(sys.exc_info()[0], sys.exc_info()[1], traceback.format_exc()))
+				elq.send_keys('wr1,wr2', Keys.ENTER)
+				time.sleep(0.5)
+				doit_clear-=1
+
+		# по тегам сохранить рейтинг
+		tagscnt=tagslen
+		crow = 0
+		times = []
+		for t in tags:
+			checkPauseKey() # key p
+			started_at = time.monotonic()
+			crow+=1
+			tagscnt-=1
+			cdata[t] = {}
+			#add new tags
+			elq.click()
+			if opts.clipboard == '1':
+				pyperclip.copy(t)
+				time.sleep(0.5)
+				#elq.send_keys(Keys.CONTROL, 'v')
+				elq.send_keys(Keys.SHIFT, Keys.INSERT)
+			else:
+				elq.send_keys(t, Keys.ENTER)
+			time.sleep(3)
+
+			#get SEO score
+			elm=driver.find_element_by_class_name('stat-value-seo-score')
+			elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+			#logging.info('seo {}'.format(elm1.text))
+			cdata[t]['seo'] = float(elm1.text)
+			
+			if cdata[t]['seo'] < 0.01:
+				# если не успело значение обновиться, то подождем еще и вычитаем повторно
+				time.sleep(2)
+				#get SEO score
+				elm=driver.find_element_by_class_name('stat-value-seo-score')
+				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+				#logging.info('seo2 {}'.format(elm1.text))
+				cdata[t]['seo'] = float(elm1.text)
+			getScores(driver, cdata[t])
+			
+			# удалить тег
+			try:
+				btn = driver.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+				if len(btn) > 1:
+					di = driver.find_element_by_id('clear-button')
+					di.click()
+				else:
+					btn[0].click()
+			except:
+				logging.info("ERROR: {}".format(traceback.format_exc()))
+			
+			if cdata[t]['ranked'] > 0:
+				# если тег ранжированный, то к оценке добавим 0.01
+				cdata[t]['seo'] += 0.01
+			if t.upper() in vid_title.upper():
+				# если тег входит в строку названия, то к оценке добавим 0.02
+				cdata[t]['seo'] += 0.02
+			
+			proctime = time.monotonic() - started_at
+			# посчитать среднее время
+			times.append(proctime)
+			tavg = statistics.median_high(times)
+			# sm = 0
+			# for tm in times:
+			# 	sm += tm
+			# tavg = sm / len(times)
+			logging.info('видео {:03d}/{:03d}, тег {:03d}/{:03d}, осталось {}, {:03d} {}->{}'.format(indx, urlslen, crow, tagslen, 
+				time.strftime('%H:%M:%S', time.gmtime(tavg*tagslen*(urlslen - indx) + (tavg * tagscnt))), tagscnt, t, cdata[t]['seo'] ))	
+			#	time.strftime('%H:%M:%S', time.gmtime(proctime*tagslen*(urlslen - indx) + (proctime * tagscnt))), tagscnt, t, cdata[t]['seo'] ))
+			
+			saveindb({'vid': vid, 'url': cururl, 'tags': {t: cdata[t]}, })
+				
+		#logging.info('cancel changes')
+		btn=driver.find_element_by_id('discard')
+		btn.click()
+		time.sleep(0.5)
+	return 33
+
+def importTags(opts):
+	logging.info(f'Загрузка списка видео из таблицы TagImport')
+	(urls, tags_cnt) = getVidTags4Import(opts.dt)
+	urlslen = len(urls.keys())
+	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
+	tagslen = tags_cnt
+	logging.info('Подготовлено {} тегов для анализа'.format(tagslen))
+	
+	driver = connect2Browser(opts)
+	indx = 0
+	# проход по видео
+	for vid, curvid in urls.items():
+		indx+=1
+		exitOnKey()
+		cururl = curvid["url"]
+		tagsIN = curvid["tags"]
+		logging.info(f'{indx:03d}/{urlslen:03d} открытие страницы {vid} видео {cururl}')
+		checkPauseKey() # key p
+		cdata = {}
+		
+		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
+		tagslen = len(tags)
+		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
+		if tagslen > 0:
+			driver.get(cururl)
+			time.sleep(2)
+			try:
+				testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+			except TimeoutException:
+				logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+				continue
+				
+			inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
+			vid_title = inpts[0].text
+			logging.info(f'Наименование видео {vid_title}')
+			# добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
+			elq = driver.find_element_by_id('text-input')
+			elq.click()
+			# #clear all tags
+			doit_clear=2
+			while doit_clear>0:
+				try:
+					di = driver.find_element_by_id('clear-button')
+					di.click()
+					doit_clear=0
+				except:
+					logging.info("find_element_by_id('clear-button') Unexpected error: {}, {}, {}".format(sys.exc_info()[0], sys.exc_info()[1], traceback.format_exc()))
+					elq.send_keys('wr1,wr2', Keys.ENTER)
+					time.sleep(0.5)
+					doit_clear-=1
+
+		# по тегам сохранить рейтинг
+		tagscnt=tagslen
+		crow = 0
+		times = []
+		for t in tags:
+			checkPauseKey() # key p
+			started_at = time.monotonic()
+			crow+=1
+			tagscnt-=1
+			cdata[t] = {}
+			#add new tags
+			elq.click()
+			if opts.clipboard == '1':
+				pyperclip.copy(t)
+				time.sleep(0.5)
+				#elq.send_keys(Keys.CONTROL, 'v')
+				elq.send_keys(Keys.SHIFT, Keys.INSERT)
+			else:
+				elq.send_keys(t, Keys.ENTER)
+			time.sleep(3)
+
+			#get SEO score
+			elm=driver.find_element_by_class_name('stat-value-seo-score')
+			elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+			#logging.info('seo {}'.format(elm1.text))
+			cdata[t]['seo'] = float(elm1.text)
+			
+			if cdata[t]['seo'] < 0.01:
+				# если не успело значение обновиться, то подождем еще и вычитаем повторно
+				time.sleep(2)
+				#get SEO score
+				elm=driver.find_element_by_class_name('stat-value-seo-score')
+				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
+				#logging.info('seo2 {}'.format(elm1.text))
+				cdata[t]['seo'] = float(elm1.text)
+			getScores(driver, cdata[t])
+			
+			# удалить тег
+			try:
+				btn = driver.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+				if len(btn) > 1:
+					di = driver.find_element_by_id('clear-button')
+					di.click()
+				else:
+					btn[0].click()
+			except:
+				logging.info("ERROR: {}".format(traceback.format_exc()))
+			
+			if cdata[t]['ranked'] > 0:
+				# если тег ранжированный, то к оценке добавим 0.01
+				cdata[t]['seo'] += 0.01
+			if t.upper() in vid_title.upper():
+				# если тег входит в строку названия, то к оценке добавим 0.02
+				cdata[t]['seo'] += 0.02
+			
+			proctime = time.monotonic() - started_at
+			# посчитать среднее время
+			times.append(proctime)
+			tavg = statistics.median_high(times)
+			# sm = 0
+			# for tm in times:
+			# 	sm += tm
+			# tavg = sm / len(times)
+			logging.info('видео {:03d}/{:03d}, тег {:03d}/{:03d}, осталось {}, {:03d} {}->{}'.format(indx, urlslen, crow, tagslen, 
+				time.strftime('%H:%M:%S', time.gmtime(tavg*tagslen*(urlslen - indx) + (tavg * tagscnt))), tagscnt, t, cdata[t]['seo'] ))	
+			#	time.strftime('%H:%M:%S', time.gmtime(proctime*tagslen*(urlslen - indx) + (proctime * tagscnt))), tagscnt, t, cdata[t]['seo'] ))
+			
+			saveindb({'vid': vid, 'url': cururl, 'tags': {t: cdata[t]}, })
+				
+		#logging.info('cancel changes')
+		btn=driver.find_element_by_id('discard')
+		btn.click()
+		time.sleep(0.5)
+	return 34
+
+def getTitleRest(opts):
+	logging.info('Загрузка списка видео из БД таблица CheckData')
+	urls = loadUrlsDB()
+	urlslen = len(urls.keys())
+	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
+	indx = 0
+	# проход по видео
+	logging.info(f'№;Кол-во;ИД видео;Ссылка;Наименование;"Остаток наименования"')
+	for vid, curv in urls.items():
+		indx+=1
+		curtitle = curv['title']
+		cururl = curv['url']
+		titlerest = removeTags(vid, cururl, curtitle)
+		logging.info(f'{indx:03d};{urlslen:03d};{vid};{cururl};"{curtitle}";"{titlerest}"')
+	return 13
+
+def loadUrlsDB():
+	cdata = {}
+	with orm.db_session:
+		for cd in CheckData.select(lambda t: t.data['title'] is not None):
+			vid = cd.data['url'].split('/')[4]
+			cdata[vid] = {'url'  : cd.data['url']
+					  ,'title': cd.data['title']}
+	return cdata
+
+def removeTags(vid, url, title):
+	resstr = title.lower()
+	lasttag = ''
+	with orm.db_session:
+		for t in orm.select(t.tag for t in TagSEO).distinct().order_by(orm.raw_sql('LENGTH(tag) DESC')):
+			resstr = resstr.replace(t.lower(), '')
+		
+		resstr = ''.join([ch for ch in resstr if ch not in '.,;:!?'])
+		resstr = ''.join([ch for ch in resstr if not ch.isdigit()])
+		ext = ['эффективный'
+			  ,'эффективные'
+			  ,'эффективная'
+			  ,'эффективной'
+			  ,'эффективными'
+			  ,'эффективному'
+			  ,'эффективное'
+			  ,' из '
+			  ,' и '
+			  ]
+		for e in ext:
+			resstr = resstr.replace(e, ' ')
+
+		todo = 100
+		while todo > 1:
+			curstr = resstr.replace('  ', ' ')
+			if resstr != curstr:
+				todo -=1
+				resstr = curstr
+			else:
+				todo = 0
+		resstr = resstr.strip()
+	return resstr
+
+def saveAnalytPg(opts):
+	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
+	tags_clearStatSheet(opts, wsd)
+	urls = anl_getVUrls(wss, opts.owner)
+
+	urlslen = len(urls)
+	logging.info(f'---------- Очередь для обработки {urlslen} ссылок')
+
+	#odt = datetime.datetime.strptime(opts.dt, '%Y-%m-%d %H:%M')
+	#logging.info('---- дата свежести сохранненых данных {}'.format(odt))
+	if urlslen > 0:
+		driver = connect2Browser(opts)
+	crow=1
+	for u in urls:
+		logging.info('-------- Обработка {:03d} из {:03d} ({:05.2f} %), {}'.format(crow, urlslen, 100.00*crow/urlslen,u['title']))
+		crow+=1
+		#logging.info(u['url'])
+		driver.get(u['url'])
+		time.sleep(2)
+		try:
+			testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_xpath('//h1[@class="page-title style-scope ytcp-app"][1]'))
+		except TimeoutException:
+			logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+			continue
+		anl_savePg(driver, 'Обзор', u['videoId'])
+		tabs = driver.find_elements_by_xpath('//ytcp-ve[@class="style-scope yta-screen"]')
+		if tabs:
+			tabs[1].click()
+			time.sleep(1)
+			anl_savePg(driver, 'Просмотры', u['videoId'])
+			tabs[2].click()
+			time.sleep(1)
+			anl_savePg(driver, 'Взаимодействие', u['videoId'])
+			tabs[3].click()
+			time.sleep(1)
+			anl_savePg(driver, 'Аудитория', u['videoId'])
+	return 1
+
+def anl_savePg(drv, pgTab, videoId):
+	pth = './pages'
+	Path(pth).mkdir(parents=True, exist_ok=True)
+	flname = '{}/{}_{}_{}.html'.format(pth, FLTYPE[pgTab]['litera'], videoId, datetime.datetime.now().strftime('%y%m%d_%H%M%S'))
+	with open(flname, 'w', encoding='utf-8') as flres:
+			flres.writelines([drv.page_source])
+	logging.info(f'Сохранена закладка {pgTab} в файле {flname}')
+def parseAnalytPg(opts):
+	pass
+
+def testfunc(opts):
+	
+	k = 0
+	buf = ''
+
+	while k < 10:
+		k+=1
+		print(f'next step {k}')
+		time.sleep(3)
+		try:
+			if msvcrt.kbhit():
+				key = msvcrt.getch()
+				print(key)   # just to show the result
+				if key ==b'p':
+					s = input('Pause. Press any key and ENTER to continue...')
+		except:
+			print(traceback.format_exc())
+	return 
+
+def checkPauseKey(k=b'p'):
+	try:
+		if msvcrt.kbhit():
+			key = msvcrt.getch()
+			#print(key)   # just to show the result
+			if key == k:
+				s = input('Pause. Press any key and ENTER to continue...')
+	except:
+		print(traceback.format_exc())
+
+def exitOnKey(k=b'q'):
+	try:
+		if msvcrt.kbhit():
+			key = msvcrt.getch()
+			#print(key)   # just to show the result
+			if key == k:
+				logging.info('Нажата секретная клавиша. Принудительный выход из программы. {}', format(datetime.datetime.now()))
+				exit(99)
+	except:
+		print(traceback.format_exc())
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -1167,13 +1695,30 @@ if __name__ == '__main__':
 	parser.add_argument('--tags', help='expire datetime', default='-')
 	parser.add_argument('--seo',help='seo to process', default='50')
 	parser.add_argument('--owner',help='owner of videos', default='Олег Брагинский')
+	parser.add_argument('--analyt',help='analytics page scenario', default='-')
+	parser.add_argument('--add',help='adds tags and estimate on videos', default='-')
+	parser.add_argument('--addtags',help='file of tags', default='-')
+	parser.add_argument('--test',help='test func', default='-')
 	args = parser.parse_args()
-	if args.tags:
-		if args.tags == '0':
-			check_list(args)
-		elif args.tags == '1':
-			set_tags(args)
+	started_at = time.monotonic()
+	if args.tags == '0':
+		check_list(args)
+	elif args.tags == '1':
+		set_tags(args)
+	elif args.tags == '2':
+		getTitleRest(args)
+	elif args.analyt == '1':
+		saveAnalytPg(args)
+	elif args.analyt == '2':
+		parseAnalytPg(args)
+	elif args.add == '1':
+		addAndEstimate(args)
+	elif args.add == '2':
+		importTags(args) # go 1378
+	elif args.test == '1':
+		testfunc(args)
 	else:
 		main(args)
-
+	proctime = time.monotonic() - started_at
+	logging.info(f'Выполнение сценария завершено за {proctime:.3f} сек.')
 	# cmd line python yt_optima.py --timeout=12 --webdriver="C:\Windows\chromedriver.exe" --infile="!in.txt"

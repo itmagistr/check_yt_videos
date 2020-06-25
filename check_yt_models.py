@@ -49,5 +49,9 @@ class TagUpdate(db.Entity):
 	jdata = orm.Optional(orm.Json)
 	saved = orm.Optional(int)
 
+class TagImport(db.Entity):
+	url = orm.Required(str)
+	tag = orm.Required(str)
+	# дата не нужна, потому что будет использоваться дата в таблице TagSEO
 
 db.generate_mapping(create_tables=True)
