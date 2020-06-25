@@ -61,7 +61,14 @@ def main(opts):
 			checkPauseKey() # key p
 			cdata = {}
 			
-			if opts.update == '3':
+			if opts.update == '2':
+				# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
+				for t in getDBtags(i, u, excludeTags):
+					cdata[t]={}
+					if len(cdata.keys()) = 0:
+						logging.info('Для видео все доступные теги оценены')
+						continue
+			elif opts.update == '3':
 				# обновление тегов если значение рейтингов выше
 				odt = datetime.datetime.strptime(opts.dt, '%Y-%m-%d %H:%M')
 				d = CheckSavedData(i, odt)
@@ -82,11 +89,7 @@ def main(opts):
 				inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
 				vid_title = inpts[0].text
 				
-				if opts.update == '2':
-					# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
-					for t in getDBtags(i, u, excludeTags):
-						cdata[t]={}
-				elif opts.update == '4':
+				if opts.update == '4':
 					# для видео добавить теги, которые входят в название и еще не проверялись под данным видео
 					inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
 					vid_title = inpts[0].text
