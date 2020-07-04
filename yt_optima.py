@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+import json
 import msvcrt
 import statistics
 import traceback
@@ -24,6 +25,9 @@ logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger('googleapicliet.discovery_cache').setLevel(logging.CRITICAL)
 logging.getLogger().addHandler(logging.FileHandler("yt_optima.log"))
+
+P100ms = 0.05 # базовая пауза. Остальные паузы указаны кратными базовой
+PMIN = 10*P100ms # минимальная пауза для прорисовки пользовательского интерфейса
 
 FLTYPE={'Обзор': {'litera': 'ov',},
 		'Просмотры': {'litera': 'v',},
@@ -52,7 +56,7 @@ def main(opts):
 	else:
 		excludeTags = []
 		if opts.update=='2':
-			excludeTags = getExtags(1, 2, 7) # min< 1, avg< 2, max< 7
+			excludeTags = getExtags(1, 2, 6.81) # min< 1, avg< 2, max< 7
 		crow=0
 		for i, u in urls.items():
 			crow+=1
@@ -65,10 +69,12 @@ def main(opts):
 				# для видео добавить теги, которые есть в БД, но не проверялись под данным видео
 				for t in getDBtags(i, u, excludeTags):
 					cdata[t]={}
-					if len(cdata.keys()) = 0:
-						logging.info('Для видео все доступные теги оценены')
-						continue
-			elif opts.update == '3':
+				if len(cdata.keys()) == 0:
+					logging.info('Для видео все доступные теги оценены')
+					continue
+				else:
+					logging.info('Для видео отобраны теги для оценки {}'.format(len(cdata.keys())))
+			if opts.update == '3':
 				# обновление тегов если значение рейтингов выше
 				odt = datetime.datetime.strptime(opts.dt, '%Y-%m-%d %H:%M')
 				d = CheckSavedData(i, odt)
@@ -79,7 +85,7 @@ def main(opts):
 
 			elif opts.update in '0124': #режим 0, 1, 2, 4
 				driver.get(u)
-				time.sleep(1) # пауза 2 при заходе на очередное видео
+				time.sleep(P100ms*20) # пауза 2 при заходе на очередное видео
 				try:
 					testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 				except TimeoutException:
@@ -115,11 +121,6 @@ def main(opts):
 				elq = driver.find_element_by_id('text-input')
 				elq.click()
 				
-				# pyperclip.copy('word1, word2')
-				# time.sleep(0.5)
-				# elq.send_keys(Keys.CONTROL, 'v')
-				# time.sleep(0.5)
-				
 				# #clear all tags
 				doit_clear=2
 				while doit_clear>0:
@@ -130,7 +131,7 @@ def main(opts):
 					except:
 						logging.info("find_element_by_id('clear-button') Unexpected error: {}".format(sys.exc_info()[0]))
 						elq.send_keys('wr1,wr2', Keys.ENTER)
-						time.sleep(0.5)
+						time.sleep(PMIN)
 						doit_clear-=1
 
 				# по тегам сохранить рейтинг
@@ -141,12 +142,12 @@ def main(opts):
 					elq.click()
 					if opts.clipboard == '1':
 						pyperclip.copy(t)
-						time.sleep(0.5)
+						time.sleep(PMIN)
 						#elq.send_keys(Keys.CONTROL, 'v')
 						elq.send_keys(Keys.SHIFT, Keys.INSERT)
 					else:
 						elq.send_keys(t, Keys.ENTER)
-					time.sleep(2.5) # пауза 3 для обновления значения VidIQ
+					time.sleep(P100ms*30) # пауза 3 для обновления значения VidIQ
 
 					#get SEO score
 					elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -156,7 +157,7 @@ def main(opts):
 					
 					if cdata[t]['seo'] < 0.01:
 						# если не успело значение обновиться, то подождем еще и вычитаем повторно
-						time.sleep(1.5) # 2 пауза второго шанса обновления значения VidIQ
+						time.sleep(P100ms*20) # 2 пауза второго шанса обновления значения VidIQ
 						#get SEO score
 						elm=driver.find_element_by_class_name('stat-value-seo-score')
 						elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -191,7 +192,7 @@ def main(opts):
 				#logging.info('cancel changes')
 				btn=driver.find_element_by_id('discard')
 				btn.click()
-				time.sleep(0.5)
+				time.sleep(PMIN)
 
 				# if opts.update!='2':
 				# 	saveindb({'vid': i, 'url': u, 'tags': cdata})
@@ -201,13 +202,12 @@ def connect2Browser(opts):
 	chrome_options = Options()
 	chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222") # запустить предварительно Хром
 	drv = webdriver.Chrome(opts.webdriver, options=chrome_options)
-	time.sleep(2) # пауза 3 при подключении к браузеру
+	time.sleep(P100ms*30) # пауза 3 при подключении к браузеру
 	drv.set_page_load_timeout(30)
 	drv.implicitly_wait(10)
 	drv.maximize_window()
-	discardChanges(drv,2) #если при запуске есть не сохраненные изменения, то отменяем перед началом перехода по ссылке
-	#driver.get("http://ya.ru")
-	tags_discardChanges(drv, 2)
+	discardChanges(drv,P100ms*20) #если при запуске есть не сохраненные изменения, то отменяем перед началом перехода по ссылке
+	
 	drv.get('https://youtube.com')
 	try:
 		testElm = WebDriverWait(drv, float(opts.timeout)).until(lambda x: x.find_element_by_id("avatar-btn"))
@@ -242,7 +242,7 @@ def loadUrls(flname):
 def tagsUpdate(drv, vid, url, o):
 	svd = 0 # не привело к сохранению в видео ютюб
 	drv.get(url)
-	time.sleep(1) # пауза 2
+	time.sleep(P100ms*20) # пауза 2
 	try:
 		testElm = WebDriverWait(drv, float(o.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 	except TimeoutException:
@@ -273,11 +273,11 @@ def tagsUpdate(drv, vid, url, o):
 		clearAlltags(drv, inp)
 		inp.click()
 		pyperclip.copy(tagStr)
-		time.sleep(0.5)
+		time.sleep(PMIN)
 		# вставить новую строку тегов
 		#inp.send_keys(Keys.CONTROL, 'v')
 		inp.send_keys(Keys.SHIFT, Keys.INSERT)
-		time.sleep(2)
+		time.sleep(P100ms*20)
 		# проверить длинну <div slot="description" id="tags-count" class="style-scope ytcp-video-metadata-basics">155/500</div>
 		tlen = 501
 		while tlen > 500:
@@ -296,7 +296,7 @@ def tagsUpdate(drv, vid, url, o):
 		# вставлять нечего, далее работаем с тем, что есть
 
 	# получить текущее состояние видео
-	time.sleep(1)
+	time.sleep(P100ms*10)
 	vidSEO2 = getYTseo4Vid(drv)
 	logging.info('seo2: {}, real2: {}, show2: {}'.format(vidSEO2['seo'], vidSEO2['treal'], vidSEO2['tshow']))
 	
@@ -308,7 +308,7 @@ def tagsUpdate(drv, vid, url, o):
 		elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
 		if len(elms)>0:
 			elms[0].click()
-			time.sleep(0.5)
+			time.sleep(PMIN)
 	
 	# продолжаем улучшать, пробуем удалять по одному тегу, возможно найдем более высокое значение рейтинга
 	todo = True if vidSEO2['treal'] < 50 else False
@@ -319,16 +319,22 @@ def tagsUpdate(drv, vid, url, o):
 	while todo and iteration < 100 and fdown < 1 and fup < 2:
 		iteration+=1
 		tlen = readTagsLen(drv)
+		deltrue = False
+		deltag = ''
 		if tlen > 0:
 			#пытаемся удалить последний тег
 			delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
 			if len(delbtns) > 0:
 				parentelm = delbtns[-1].find_element_by_xpath("./..")
-				logging.info('удаляем тег: {}'.format(parentelm.get_attribute('vidiq-keyword')))
+				deltag = parentelm.get_attribute('vidiq-keyword')
 				delbtns[-1].click()
-				time.sleep(2)
+				time.sleep(P100ms*20)
+				deltrue = True
 
 		vidSEOcur = getYTseo4Vid(drv)
+		if deltrue:
+			logging.info('удаляем тег: {}, seo: {}, real: {}, show: {}'.format(deltag,
+						vidSEOcur['seo'], vidSEOcur['treal'], vidSEOcur['tshow']))
 
 		if ( vidSEOlast['treal'] > vidSEOcur['treal'] ): #and ( abs(vidSEOlast['tshow'] - vidSEOcur['tshow']) <0.1 ):
 			# уменьшился рейтинг после удаления тега - отменяем и завершаем подбор
@@ -344,7 +350,7 @@ def tagsUpdate(drv, vid, url, o):
 			elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
 			if len(elms)>0:
 				elms[0].click()
-				time.sleep(0.5)
+				time.sleep(PMIN)
 			todo = True if vidSEOcur['treal'] < 50 else False
 			vidSEOlast = vidSEOcur.copy()
 
@@ -356,7 +362,7 @@ def tagsUpdate(drv, vid, url, o):
 		
 
 	# сохранить рейтинг в БД
-	time.sleep(3) #пауза 3
+	time.sleep(P100ms*30) #пауза 3
 	vidSEO2 = getYTseo4Vid(drv)
 	if float(vidSEO2['treal']) > float(vidSEO1['treal']):
 		logging.info('!!! текущий seo: {:05.2f} > старого {:05.2f}, show2: {}, show1: {}'.format(float(vidSEO2['treal']), float(vidSEO1['treal']), vidSEO2['tshow'], vidSEO1['tshow']))
@@ -377,7 +383,7 @@ def clearAlltags(drv, inp):
 	# clear all tags
 	# inp = drv.find_element_by_id('text-input')
 	inp.click()
-	time.sleep(0.5)
+	time.sleep(PMIN)
 	doit_clear=2
 	while doit_clear>0:
 		try:
@@ -387,7 +393,7 @@ def clearAlltags(drv, inp):
 		except:
 			logging.info("find_element_by_id('clear-button') Unexpected error: {}".format(sys.exc_info()[0]))
 			inp.send_keys('wr1,wr2', Keys.ENTER)
-			time.sleep(0.5)
+			time.sleep(PMIN)
 			doit_clear-=1
 	pass
 
@@ -472,8 +478,9 @@ def getDBtags(vid, url, extags=[]):
 		if extags is None:
 			extags = []
 		#logging.info(tags)
-		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag not in tags and ts.tag not in extags).order_by(orm.desc(TagSEO.seo)):
-			restags+=[tss.tag]
+		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url).order_by(orm.desc(TagSEO.seo)):
+			if tss.tag not in tags and tss.tag not in extags:
+				restags+=[tss.tag]
 		#logging.info(restags)
 	return restags
 
@@ -487,8 +494,9 @@ def getTitleTags(vid, url, title, addtags=[]):
 		for t in addtags:
 			if t not in tags:
 				ats.append(t)
-		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag not in tags and ts.tag in loctitle and ts.tag not in addtags).order_by(orm.desc(TagSEO.seo)):
-			restags+=[tss.tag]
+		for tss in TagSEO.select(lambda ts: ts.vid!=vid and ts.url!=url and ts.tag in loctitle).order_by(orm.desc(TagSEO.seo)):
+			if tss.tag not in tags and tss.tag not in addtags:
+				restags+=[tss.tag]
 		#logging.info(restags)
 		for t in ats:
 			if t not in restags:
@@ -556,10 +564,6 @@ def getScores(dr, tdata):
 
 # --update=3 собрать теги и рейтинги
 def getYTseo4Vid(drv):
-	#собрать теги
-	# inp = drv.find_element_by_id('text-input')
-	# inp.click()
-	# time.sleep(0.3)
 	tags=[]
 	for elm in drv.find_elements_by_xpath("//*[@id='child-input']//ytcp-chip[@role='button']"):
 		text = elm.get_attribute('vidiq-keyword')
@@ -634,9 +638,9 @@ def rateWords(drv, opts):
 	wordscnt= len(words)				
 	logging.info('Прочитано из файла слов: {}'.format(wordscnt))
 	logging.info('Перехожу по ссылке: {}'.format(url))
-	#discardChanges(drv,1)
+	
 	drv.get(url)
-	time.sleep(1)  # пауза 3
+	time.sleep(P100ms*30)  # пауза 3
 	try:
 		testElm = WebDriverWait(drv, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 	except TimeoutException:
@@ -652,11 +656,11 @@ def rateWords(drv, opts):
 		inp.click()
 		if opts.clipboard=='1':
 			pyperclip.copy(w)
-			time.sleep(0.5)
+			time.sleep(PMIN)
 			inp.send_keys(Keys.SHIFT, Keys.INSERT)
 		else:
 			inp.send_keys(w+',',Keys.ENTER)
-		time.sleep(2) # пауза 3
+		time.sleep(P100ms*30) # пауза 3
 		# подождать появления подсказок
 		sugText=''
 		try:
@@ -678,7 +682,7 @@ def rateWords(drv, opts):
 		elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 		logging.info('{:03d}/{:03d} ;{:05.2f};{};{}'.format(curw, wordscnt, float(elm1.text), w, sugText))
 		delTag(drv)
-	discardChanges(drv)
+	discardChanges(drv, PMIN)
 	newresfile = '!addwords_{}.txt'.format(datetime.datetime.now().strftime('%y%m%d_%H%M'))
 	with open(newresfile, 'w', encoding='utf-8') as flres:
 		for adw in addwrds:
@@ -796,15 +800,31 @@ def tags_openxls(flname):
 	return (wb, wss, wsd, wst, newWBfile)
 	
 	
-	
+def loadUrlsFromTxt(flname):
+	res = []
+	if os.path.exists(flname):
+		indx = 0
+		with open(flname, 'r', encoding='utf-8') as fl:
+			for l in fl.readlines():
+				curval = l.strip()
+				if ('studio.youtube.com' in curval) :
+					url = curval.strip()
+				elif ('youtube.com' in curval) :
+					url = curval.replace('https://youtube.com/watch?v=', 'https://studio.youtube.com/video/')+'/edit'
+				res.append({'url': url, 'num': indx, 'title': 'Видео из текстового файла'})
+	return res
 
 def check_list(opts):
 	started_at = time.monotonic()
 	#if opts.tags == '0':  обновление статистики чек-листа
 	#(wb, wss, wsd, wse, wst, newWBfile) = tags_openxls(opts.infile)
-	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
-	tags_clearStatSheet(opts, wsd)
-	urls = tags_getUrls(wss, opts.owner)
+	isxls = True if '.xls' in opts.infile else False
+	if isxls:
+		(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
+		tags_clearStatSheet(opts, wsd)
+		urls = tags_getUrls(wss, opts.owner)
+	else:
+		urls = loadUrlsFromTxt(opts.infile)
 	urlslen = len(urls)
 	logging.info(f'---------- Очередь для обработки {urlslen} ссылок')
 
@@ -814,45 +834,60 @@ def check_list(opts):
 		driver = connect2Browser(opts)
 	crow=1
 	for u in urls:
-		logging.info('-------- Обработка {:03d} из {:03d} ({:05.2f} %), {}'.format(crow, urlslen, 100.00*crow/urlslen,u['title']))
+		resttime = (urlslen - crow) * (time.monotonic() - started_at) / crow
+		if isxls:
+			logging.info('-------- Обработка {:03d} из {:03d} ({:05.2f} %), осталось {}, {}'.format(crow, urlslen, 100.00*crow/urlslen, 
+					time.strftime('%H:%M:%S', time.gmtime(resttime)), u['title']))
+		else:
+			logging.info('-------- Обработка {:03d} из {:03d} ({:05.2f} %), осталось {}, {}'.format(crow, urlslen, 100.00*crow/urlslen, 
+					time.strftime('%H:%M:%S', time.gmtime(resttime)), u['url']))
 		crow+=1
-
 		svdata = tags_CheckSavedData(u['url'], odt)
 		if svdata is not None and float(opts.seo) <= float(svdata["seo"]):
-			# записать в эксель данные из БД
-			tags_write2xls(wsd, crow, svdata)
+			if isxls:
+				# записать в эксель данные из БД
+				tags_write2xls(wsd, crow, svdata)
+			else:
+				logging.info('в БД seo = {}'.format(svdata["seo"]))
 		else:
 			#запустить сбор данных и сохранение для дальнейшего использования
 			if svdata is not None:
 				logging.info('в БД seo = {}'.format(svdata["seo"]))
 			else:
-				logging.info('новое видео в списке, сбор информации')
+				logging.info('сбор информации о видео')
 			driver.get(u['url'])
-			wsd.cell(row=crow, column=1, value=u['num'])
-			wsd.cell(row=crow, column=2, value=u['title'])
-			wsd.cell(row=crow, column=3, value=u['url'])
-			time.sleep(1)
+			if isxls:
+				wsd.cell(row=crow, column=1, value=u['num'])
+				wsd.cell(row=crow, column=2, value=u['title'])
+				wsd.cell(row=crow, column=3, value=u['url'])
+			time.sleep(P100ms*10)
 			# Обрабатывать ошибку "чужое видео" пример https://studio.youtube.com/video/ez5hxF1jP-A/edit
 			try:
 				myElem = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
 			except TimeoutException:
 				if driver.find_element_by_id("error-image"):
-					logging.info("Видео не доступно. {}, url={}".format(u['title'], u['url']))
+					logging.info("Видео не доступно или показатели seo не успели отобразиться на веб-странице. {}, url={}".format(u['title'], u['url']))
 					continue
 				logging.info("Loading took too much time!")
 
 			driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-			time.sleep(0.5)
+			time.sleep(PMIN)
 
 			cdata={'num': u['num'],
 				   'title': u['title'],
 				   'url': u['url'],}
-
+			if not isxls:
+				# read title from web page
+				inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
+				vid_title = inpts[0].text
+				cdata['title'] = vid_title
+			
 			#get SEO score
 			elm=driver.find_element_by_class_name('stat-value-seo-score')
 			elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			logging.info('seo {}'.format(elm1.text))
-			wsd.cell(row=crow, column=4, value=float(elm1.text))
+			if isxls:
+				wsd.cell(row=crow, column=4, value=float(elm1.text))
 			cdata['seo'] = elm1.text
 			
 			#get h1 stat-value-undefined two times
@@ -860,33 +895,38 @@ def check_list(opts):
 			#logging.info('elms count {}'.format(len(elms)))
 			elm1 = elms[0].find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			#logging.info('undefined {}'.format(elm1.text))
-			wsd.cell(row=crow, column=5, value=float(elm1.text))
+			if isxls:
+				wsd.cell(row=crow, column=5, value=float(elm1.text))
 			cdata['stat-value1'] = elm1.text
 
 			elm1 = elms[1].find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			#logging.info('undefined {}'.format(elm1.text))
-			wsd.cell(row=crow, column=11, value=float(elm1.text))
+			if isxls:
+				wsd.cell(row=crow, column=11, value=float(elm1.text))
 			cdata['stat-value2'] = elm1.text
 
 			#get stat-value-tag-count
 			elm=driver.find_element_by_class_name('stat-value-tag-count')
 			elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			#logging.info('count {}'.format(elm1.text))
-			wsd.cell(row=crow, column=6, value=int(elm1.text))
+			if isxls:
+				wsd.cell(row=crow, column=6, value=int(elm1.text))
 			cdata['tag-count'] = elm1.text
 
 			#get stat-value-tag-volume
 			elm=driver.find_element_by_class_name('stat-value-tag-volume')
 			elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			#logging.info('volume {}'.format(elm1.text))
-			wsd.cell(row=crow, column=7, value=int(elm1.text))
+			if isxls:
+				wsd.cell(row=crow, column=7, value=int(elm1.text))
 			cdata['tag-volume'] = elm1.text
 
 			#get stat-value-keywords-in-title
 			elm=driver.find_element_by_class_name('stat-value-keywords-in-title')
 			elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 			#logging.info('title {}'.format(elm1.text))
-			wsd.cell(row=crow, column=8, value=int(elm1.text))
+			if isxls:
+				wsd.cell(row=crow, column=8, value=int(elm1.text))
 			cdata['keywords-in-title'] = elm1.text
 
 			#get stat-value-keywords-in-description
@@ -894,7 +934,8 @@ def check_list(opts):
 				elm=driver.find_element_by_class_name('stat-value-keywords-in-description')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 				#logging.info('seo {}'.format(elm1.text))
-				wsd.cell(row=crow, column=9, value=int(elm1.text))
+				if isxls:
+					wsd.cell(row=crow, column=9, value=int(elm1.text))
 				cdata['keywords-in-description'] = elm1.text
 			except:
 				logging.info("stat-value-keywords-in-description Unexpected error: {}".format(sys.exc_info()[0]))
@@ -904,7 +945,8 @@ def check_list(opts):
 				elm=driver.find_element_by_class_name('stat-value-tripled-keywords')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 				#logging.info('tripled-keywords {}'.format(elm1.text))
-				wsd.cell(row=crow, column=10, value=int(elm1.text))
+				if isxls:
+					wsd.cell(row=crow, column=10, value=int(elm1.text))
 				cdata['tripled-keywords'] = elm1.text
 			except:
 				logging.info("stat-value-tripled-keywords Unexpected error: {}".format(sys.exc_info()[0]))
@@ -915,7 +957,8 @@ def check_list(opts):
 				elm=driver.find_element_by_class_name('stat-value-ranked-tags')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 				#logging.info('undefined {}'.format(elm1.text))
-				wsd.cell(row=crow, column=12, value=int(elm1.text))
+				if isxls:
+					wsd.cell(row=crow, column=12, value=int(elm1.text))
 				cdata['ranked-tags'] = elm1.text
 			except:
 				logging.info("stat-value-ranked-tags Unexpected error: {}".format(sys.exc_info()[0]))
@@ -925,7 +968,8 @@ def check_list(opts):
 				elm=driver.find_element_by_class_name('stat-value-high-volume-ranked-tags')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 				#logging.info('undefined {}'.format(elm1.text))
-				wsd.cell(row=crow, column=13, value=int(elm1.text))
+				if isxls:
+					wsd.cell(row=crow, column=13, value=int(elm1.text))
 				cdata['volume-ranked-tags'] = elm1.text
 			except:
 				logging.info("stat-value-high-volume-ranked-tags Unexpected error: {}".format(sys.exc_info()[0]))
@@ -938,13 +982,15 @@ def check_list(opts):
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 				logging.info('check-list {}'.format(elm1.text))
 				col=14
-				wsd.cell(row=crow, column=col, value=int(elm1.text))
+				if isxls:
+					wsd.cell(row=crow, column=col, value=int(elm1.text))
 				cdata['chl-14'] = int(elm1.text)
 
 				elm = driver.find_element_by_class_name('seo-checklist')
 				for el in elm.find_elements_by_xpath(".//li")[:9]:
 					col+=1
-					wsd.cell(row=crow, column=col, value=1 if 'checked' == el.get_attribute('class') else 0)
+					if isxls:
+						wsd.cell(row=crow, column=col, value=1 if 'checked' == el.get_attribute('class') else 0)
 					cdata['chl-{}'.format(col)] = 1 if 'checked' == el.get_attribute('class') else 0
 			except:
 				logging.info("stat-box-checklist Unexpected error: {}".format(sys.exc_info()[0]))
@@ -952,8 +998,9 @@ def check_list(opts):
 			tags_SaveCheckData(cdata)
 		# except:
 		# 	continue
-	wb.save(newWBfile)
-	logging.info(f'Результаты сохранены в файле {newWBfile}')
+	if isxls:
+		wb.save(newWBfile)
+		logging.info(f'Результаты сохранены в файле {newWBfile}')
 	logging.info('Работа сценария завершена за {:.3f} сек.'.format(time.monotonic() -started_at))
 	return
 
@@ -983,7 +1030,7 @@ def set_tags(opts):
 		else:
 			#запустить установку тегов
 			driver.get(u['url'])
-			time.sleep(1)
+			time.sleep(P100ms*10)
 			# Обрабатывать ошибку "чужое видео" пример https://studio.youtube.com/video/ez5hxF1jP-A/edit
 			try:
 				myElem = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
@@ -1012,9 +1059,9 @@ def set_tags(opts):
 				elq = driver.find_element_by_id('text-input')
 				elq.click()
 				pyperclip.copy('word1, word2')
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				#clear all tags
 				try:
 					di = driver.find_element_by_id('clear-button')
@@ -1025,9 +1072,9 @@ def set_tags(opts):
 				#add new tags
 				elq.click()
 				pyperclip.copy(u['taginfo']['newtags'])
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
-				time.sleep(2.5) # пауза 3
+				time.sleep(P100ms*30) # пауза 3
 
 				#get SEO score
 				elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -1037,7 +1084,7 @@ def set_tags(opts):
 				
 				if cdata['seo2'] < 0.01:
 					# если не успело значение обновиться, то подождем еще и вычитаем повторно
-					time.sleep(1.5) # пауза 2
+					time.sleep(P100ms*20) # пауза 2
 					#get SEO score
 					elm=driver.find_element_by_class_name('stat-value-seo-score')
 					elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -1050,12 +1097,12 @@ def set_tags(opts):
 					elms=driver.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
 					if len(elms)>0:
 						elms[0].click()
-						time.sleep(1)
+						time.sleep(P100ms*10)
 				else:
 					logging.info('cancel')
 					elm=driver.find_element_by_id('discard')
 					elm.click()
-					time.sleep(0.5)
+					time.sleep(PMIN)
 			else:
 				logging.info('seo {} > tag rate {}'.format(cdata['seo1'], float(u['taginfo']['maxseo'])))	
 			
@@ -1257,14 +1304,6 @@ def tags_write2xls(ws, crow, data):
 		key = 'chl-{}'.format(i)
 		ws.cell(row=crow, column=i, value=int(data[key]) if key in data else '')
 
-def tags_discardChanges(drv, wt=0.5):
-	#logging.info('cancel changes')
-	try:
-		btn=drv.find_element_by_id('discard')
-		btn.click()
-		time.sleep(wt)
-	except:
-		pass
 def tags_clearStatSheet(opts, wsd):
 	crow = 1
 	emptyrows = 0
@@ -1302,17 +1341,21 @@ def addAndEstimate(opts):
 		logging.info(f'{indx:03d}/{urlslen:03d} открытие страницы {vid} видео {cururl}')
 		checkPauseKey() # key p
 		cdata = {}
-		driver.get(cururl)
-		time.sleep(1) # пауза 2
 		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
 		tagslen = len(tags)
 		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
-		try:
-			testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
-		except TimeoutException:
-			logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
-			continue
-				
+		
+		if tagslen > 0:
+			driver.get(cururl)
+			time.sleep(P100ms*20) # пауза 2
+		
+			try:
+				testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+			except TimeoutException:
+				logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+				continue
+		else:
+			continue			
 		inpts = driver.find_elements_by_xpath("//ytcp-mention-input")
 		vid_title = inpts[0].text
 		logging.info(f'Наименование видео {vid_title}')
@@ -1329,7 +1372,7 @@ def addAndEstimate(opts):
 			except:
 				logging.info("find_element_by_id('clear-button') Unexpected error: {}, {}, {}".format(sys.exc_info()[0], sys.exc_info()[1], traceback.format_exc()))
 				elq.send_keys('wr1,wr2', Keys.ENTER)
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				doit_clear-=1
 
 		# по тегам сохранить рейтинг
@@ -1346,12 +1389,12 @@ def addAndEstimate(opts):
 			elq.click()
 			if opts.clipboard == '1':
 				pyperclip.copy(t)
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				#elq.send_keys(Keys.CONTROL, 'v')
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
 			else:
 				elq.send_keys(t, Keys.ENTER)
-			time.sleep(2.5) # пауза 3
+			time.sleep(P100ms*30) # пауза 3
 
 			#get SEO score
 			elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -1361,7 +1404,7 @@ def addAndEstimate(opts):
 			
 			if cdata[t]['seo'] < 0.01:
 				# если не успело значение обновиться, то подождем еще и вычитаем повторно
-				time.sleep(1.5) # пауза 2
+				time.sleep(P100ms*20) # пауза 2
 				#get SEO score
 				elm=driver.find_element_by_class_name('stat-value-seo-score')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -1404,7 +1447,7 @@ def addAndEstimate(opts):
 		#logging.info('cancel changes')
 		btn=driver.find_element_by_id('discard')
 		btn.click()
-		time.sleep(0.5)
+		time.sleep(PMIN)
 	return 33
 
 def importTags(opts):
@@ -1427,7 +1470,7 @@ def importTags(opts):
 		checkPauseKey() # key p
 		cdata = {}
 		driver.get(cururl)
-		time.sleep(1) # пауза 2
+		time.sleep(P100ms*20) # пауза 2
 		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
 		tagslen = len(tags)
 		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
@@ -1453,7 +1496,7 @@ def importTags(opts):
 			except:
 				logging.info("find_element_by_id('clear-button') Unexpected error: {}, {}, {}".format(sys.exc_info()[0], sys.exc_info()[1], traceback.format_exc()))
 				elq.send_keys('wr1,wr2', Keys.ENTER)
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				doit_clear-=1
 
 		# по тегам сохранить рейтинг
@@ -1470,12 +1513,12 @@ def importTags(opts):
 			elq.click()
 			if opts.clipboard == '1':
 				pyperclip.copy(t)
-				time.sleep(0.5)
+				time.sleep(PMIN)
 				#elq.send_keys(Keys.CONTROL, 'v')
 				elq.send_keys(Keys.SHIFT, Keys.INSERT)
 			else:
 				elq.send_keys(t, Keys.ENTER)
-			time.sleep(2.5) # пауза 3
+			time.sleep(P100ms*30) # пауза 3
 
 			#get SEO score
 			elm=driver.find_element_by_class_name('stat-value-seo-score')
@@ -1485,7 +1528,7 @@ def importTags(opts):
 			
 			if cdata[t]['seo'] < 0.01:
 				# если не успело значение обновиться, то подождем еще и вычитаем повторно
-				time.sleep(1.5) # пауза 2
+				time.sleep(P100ms*20) # пауза 2
 				#get SEO score
 				elm=driver.find_element_by_class_name('stat-value-seo-score')
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
@@ -1528,7 +1571,7 @@ def importTags(opts):
 		#logging.info('cancel changes')
 		btn=driver.find_element_by_id('discard')
 		btn.click()
-		time.sleep(0.5)
+		time.sleep(PMIN)
 	return 34
 
 def getTitleRest(opts):
@@ -1589,6 +1632,73 @@ def removeTags(vid, url, title):
 		resstr = resstr.strip()
 	return resstr
 
+def PrepareTags(opts):
+	# read videos in videos
+	urls=loadUrls(opts.infile)
+	urlslen = len(urls.keys())
+	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
+	imptags = [] # [(url, tag)]
+	rtags = []
+	if opts.truncate == '1':
+		with orm.db_session:
+			db.execute('DELETE FROM TagImport;')
+			#db.execute('VACUUM;')
+	if opts.rtag =='1':
+		with orm.db_session:
+			tags = orm.select(x for x in TagSEO if x.seo > 0)
+			for t in tags:
+				if str(int(round(100*t.seo)))[-1] in '13':
+					rtags.append(t.tag)
+			#logging.info(f'rtags={rtags}')
+			lenrtags = len(rtags)
+			logging.info(f'Ранжированных тегов {lenrtags}')
+
+	# пройдем по видео
+	cnt = 0
+	for v in urls:
+		cnt+=1
+		intags = []
+		cururl = urls[v]
+
+		logging.info(f'{cnt}/{urlslen}, Вставка тегов для видео {cururl}')
+		with orm.db_session:
+			vidtags = [tg.tag for tg in TagSEO.select(lambda x: x.url==cururl)]
+			# прочитать название видео
+			cd = CheckData.get(url=cururl)
+			if cd is not None:
+				vidtitle = cd.data['title']
+			else:
+				vidtitle = ''
+			logging.info(f'название видео: {vidtitle}')
+
+			if opts.rtag =='1':
+				cntinsert = 0
+				for rt in rtags:
+					if (rt not in intags) and (rt not in vidtags):
+						TagImport(url=cururl, tag=rt)
+						intags.append(rt)
+						cntinsert+=1
+				logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
+
+			if opts.tit =='1':
+				cntinsert = 0
+				for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
+					if (tt not in intags) and (tt not in vidtags):
+						TagImport(url=cururl, tag=rt)
+						intags.append(tt)
+						cntinsert+=1
+				logging.info(f'Вставлено тегов входящих в название: {cntinsert}')
+
+			# if opts.cross = '1':
+			# 	cntinsert = 0
+			# 	for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
+			# 		if (tt not in intags) and (tt not in vidtags):
+			# 			TagImport(url=cururl, tag=rt)
+			# 			intags.append(tt)
+			# 			cntinsert+=1
+			# 	logging.info(f'Вставлено тегов 1, 2, 7: {cntinsert}')
+	return 1
+
 def saveAnalytPg(opts):
 	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
 	tags_clearStatSheet(opts, wsd)
@@ -1607,7 +1717,7 @@ def saveAnalytPg(opts):
 		crow+=1
 		#logging.info(u['url'])
 		driver.get(u['url'])
-		time.sleep(1) # пауза 2
+		time.sleep(P100ms*20) # пауза 2
 		try:
 			testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_xpath('//h1[@class="page-title style-scope ytcp-app"][1]'))
 		except TimeoutException:
@@ -1617,13 +1727,13 @@ def saveAnalytPg(opts):
 		tabs = driver.find_elements_by_xpath('//ytcp-ve[@class="style-scope yta-screen"]')
 		if tabs:
 			tabs[1].click()
-			time.sleep(1)
+			time.sleep(P100ms*10)
 			anl_savePg(driver, 'Просмотры', u['videoId'])
 			tabs[2].click()
-			time.sleep(1)
+			time.sleep(P100ms*10)
 			anl_savePg(driver, 'Взаимодействие', u['videoId'])
 			tabs[3].click()
-			time.sleep(1)
+			time.sleep(P100ms*10)
 			anl_savePg(driver, 'Аудитория', u['videoId'])
 	return 1
 
@@ -1645,7 +1755,7 @@ def testfunc(opts):
 	while k < 10:
 		k+=1
 		print(f'next step {k}')
-		time.sleep(3)
+		time.sleep(P100ms*30)
 		try:
 			if msvcrt.kbhit():
 				key = msvcrt.getch()
@@ -1700,6 +1810,9 @@ if __name__ == '__main__':
 	parser.add_argument('--add',help='adds tags and estimate on videos', default='-')
 	parser.add_argument('--addtags',help='file of tags', default='-')
 	parser.add_argument('--test',help='test func', default='-')
+	parser.add_argument('--truncate',help='truncate TagImport', default='-')
+	parser.add_argument('--rtag',help='ranked tags for TagImport', default='-')
+	parser.add_argument('--tit',help='tags in video title for TagImport', default='-')
 	args = parser.parse_args()
 	started_at = time.monotonic()
 	if args.tags == '0':
@@ -1716,6 +1829,8 @@ if __name__ == '__main__':
 		addAndEstimate(args)
 	elif args.add == '2':
 		importTags(args) # go 1378
+	elif args.add == '3':
+		PrepareTags(args) # go 1628
 	elif args.test == '1':
 		testfunc(args)
 	else:
