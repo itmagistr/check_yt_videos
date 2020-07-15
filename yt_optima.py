@@ -81,7 +81,8 @@ def main(opts):
 				if d is not None:
 					logging.info('treal:{} -> {}, tshow: {} -> {}, at {}'.format(d['rate'][0]['treal'], d['rate'][1]['treal'], d['rate'][0]['tshow'], d['rate'][1]['tshow'], d['dt']))
 				else:
-					tagsUpdate(driver, i, u, opts)
+					tagsUpdate_V2(driver, i, u, opts)
+					#tagsUpdate(driver, i, u, opts) # первая попытка
 
 			elif opts.update in '0124': #режим 0, 1, 2, 4
 				driver.get(u)
@@ -176,17 +177,16 @@ def main(opts):
 					except:
 						logging.info("ERROR: {}".format(sys.exc_info()[0]))
 						
-
-					
-					
+					extstr = ''
 					if cdata[t]['ranked'] > 0:
 						# если тег ранжированный, то к оценке добавим 0.01
 						cdata[t]['seo'] += 0.01
+						extstr = '< РАНЖИРОВАННЫЙ >'
 					if t.upper() in vid_title.upper():
 						# если тег входит в строку названия, то к оценке добавим 0.02
 						cdata[t]['seo'] += 0.02
 					saveindb({'vid': i, 'url': u, 'tags': {t: cdata[t]}, })
-					logging.info('{:03d}/{:03d}, {:03d} {}->{}'.format(crow, urlslen, tagscnt, t, cdata[t]['seo']))
+					logging.info('{:03d}/{:03d}, {:03d} {}->{} {}'.format(crow, urlslen, tagscnt, t, cdata[t]['seo'], extstr))
 					checkPauseKey()
 
 				#logging.info('cancel changes')
@@ -1244,20 +1244,31 @@ def getVidTags4Import(indt):
 		vidtags = TagImport.select().order_by(TagImport.url)
 		for vt in vidtags:
 			if vt.url == lasturl:
-				viddata[vid]['tags'].append(vt.tag)
+				viddata[vid]['tags'].append({'t': vt.tag, 'ttype': vt.ttype})
 			else:
 				(vid, url) = getVID(vt.url)
-				viddata[vid]={'url': url, 'tags': [vt.tag]}
+				viddata[vid]={'url': url, 'tags': [{'t': vt.tag, 'ttype': vt.ttype}]}
+				lasturl = vt.url
 			cnt_tags+=1
 	return (viddata, cnt_tags)
 
-def getNewTags4Vid(curl, alltags, indt):
+def getNewTags4Vid1(curl, alltags, indt):
 	odt = datetime.datetime.strptime(indt, '%Y-%m-%d %H:%M')
 	restags = []
 	with orm.db_session:
 		vidTags = [ts.tag for ts in TagSEO.select(lambda x: x.url==curl and x.dt > odt).order_by(TagSEO.tag)]
 	for t in alltags:
 		if t not in vidTags:
+			restags.append(t)
+	return restags
+
+def getNewTags4Vid2(curl, alltags, indt):
+	odt = datetime.datetime.strptime(indt, '%Y-%m-%d %H:%M')
+	restags = []
+	with orm.db_session:
+		vidTags = [ts.tag for ts in TagSEO.select(lambda x: x.url==curl and x.dt > odt).order_by(TagSEO.tag)]
+	for t in alltags:
+		if t['t'] not in vidTags:
 			restags.append(t)
 	return restags
 
@@ -1341,7 +1352,7 @@ def addAndEstimate(opts):
 		logging.info(f'{indx:03d}/{urlslen:03d} открытие страницы {vid} видео {cururl}')
 		checkPauseKey() # key p
 		cdata = {}
-		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
+		tags = getNewTags4Vid1(cururl, tagsIN, opts.dt)
 		tagslen = len(tags)
 		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
 		
@@ -1471,7 +1482,7 @@ def importTags(opts):
 		cdata = {}
 		driver.get(cururl)
 		time.sleep(P100ms*20) # пауза 2
-		tags = getNewTags4Vid(cururl, tagsIN, opts.dt)
+		tags = getNewTags4Vid2(cururl, tagsIN, opts.dt)
 		tagslen = len(tags)
 		logging.info(f'{tagslen} тегов для оценки под текущим видео с учетом даты {opts.dt}')
 		try:
@@ -1503,7 +1514,9 @@ def importTags(opts):
 		tagscnt=tagslen
 		crow = 0
 		times = []
-		for t in tags:
+		for tagelm in tags:
+			t = tagelm['t']
+			ttype = tagelm['ttype']
 			checkPauseKey() # key p
 			started_at = time.monotonic()
 			crow+=1
@@ -1547,9 +1560,13 @@ def importTags(opts):
 			except:
 				logging.info("ERROR: {}".format(traceback.format_exc()))
 			
+			extstr = '<{}>'.format(ttype)
+			if cdata[t]['seo'] > 7:
+				extstr += '----BIG--'
 			if cdata[t]['ranked'] > 0:
 				# если тег ранжированный, то к оценке добавим 0.01
 				cdata[t]['seo'] += 0.01
+				extstr += '--RANKED'
 			if t.upper() in vid_title.upper():
 				# если тег входит в строку названия, то к оценке добавим 0.02
 				cdata[t]['seo'] += 0.02
@@ -1562,8 +1579,8 @@ def importTags(opts):
 			# for tm in times:
 			# 	sm += tm
 			# tavg = sm / len(times)
-			logging.info('видео {:03d}/{:03d}, тег {:03d}/{:03d}, осталось {}, {:03d} {}->{}'.format(indx, urlslen, crow, tagslen, 
-				time.strftime('%H:%M:%S', time.gmtime(tavg*tagslen*(urlslen - indx) + (tavg * tagscnt))), tagscnt, t, cdata[t]['seo'] ))	
+			logging.info('видео {:03d}/{:03d}, тег {:03d}/{:03d}, осталось {}, {:03d} {}->{} {}'.format(indx, urlslen, crow, tagslen, 
+				time.strftime('%H:%M:%S', time.gmtime(tavg*tagslen*(urlslen - indx) + (tavg * tagscnt))), tagscnt, t, cdata[t]['seo'], extstr ))	
 			#	time.strftime('%H:%M:%S', time.gmtime(proctime*tagslen*(urlslen - indx) + (proctime * tagscnt))), tagscnt, t, cdata[t]['seo'] ))
 			
 			saveindb({'vid': vid, 'url': cururl, 'tags': {t: cdata[t]}, })
@@ -1633,71 +1650,113 @@ def removeTags(vid, url, title):
 	return resstr
 
 def PrepareTags(opts):
-	# read videos in videos
-	urls=loadUrls(opts.infile)
-	urlslen = len(urls.keys())
-	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
-	imptags = [] # [(url, tag)]
-	rtags = []
+	# если требуется очистить таблицу
 	if opts.truncate == '1':
 		with orm.db_session:
 			db.execute('DELETE FROM TagImport;')
 			#db.execute('VACUUM;')
-	if opts.rtag =='1':
-		with orm.db_session:
-			tags = orm.select(x for x in TagSEO if x.seo > 0)
-			for t in tags:
-				if str(int(round(100*t.seo)))[-1] in '13':
-					rtags.append(t.tag)
-			#logging.info(f'rtags={rtags}')
-			lenrtags = len(rtags)
-			logging.info(f'Ранжированных тегов {lenrtags}')
+	if len(opts.infile) > 1:
+		# read videos in videos
+		urls=loadUrls(opts.infile)
+		urlslen = len(urls.keys())
+		logging.info('Подготовлено {} видео для анализа'.format(urlslen))
+	
+		imptags = [] # [(url, tag)]
+		rtags = []
+		
+		if opts.rtag =='1':
+			with orm.db_session:
+				tags = orm.select(x for x in TagSEO if x.seo > 0)
+				for t in tags:
+					if str(int(round(100*t.seo)))[-1] in '13':
+						rtags.append(t.tag)
+				#logging.info(f'rtags={rtags}')
+				lenrtags = len(rtags)
+				logging.info(f'Ранжированных тегов {lenrtags}')
 
-	# пройдем по видео
-	cnt = 0
-	for v in urls:
-		cnt+=1
-		intags = []
-		cururl = urls[v]
+		# пройдем по видео
+		cnt = 0
+		for v in urls:
+			cnt+=1
+			intags = []
+			cururl = urls[v]
 
-		logging.info(f'{cnt}/{urlslen}, Вставка тегов для видео {cururl}')
-		with orm.db_session:
-			vidtags = [tg.tag for tg in TagSEO.select(lambda x: x.url==cururl)]
-			# прочитать название видео
-			cd = CheckData.get(url=cururl)
-			if cd is not None:
-				vidtitle = cd.data['title']
-			else:
-				vidtitle = ''
-			logging.info(f'название видео: {vidtitle}')
+			logging.info(f'{cnt}/{urlslen}, Вставка тегов для видео {cururl}')
+			with orm.db_session:
+				vidtags = [tg.tag for tg in TagSEO.select(lambda x: x.url==cururl)]
+				# прочитать название видео
+				cd = CheckData.get(url=cururl)
+				if cd is not None:
+					vidtitle = cd.data['title']
+				else:
+					vidtitle = ''
+				logging.info(f'название видео: {vidtitle}')
 
-			if opts.rtag =='1':
-				cntinsert = 0
-				for rt in rtags:
-					if (rt not in intags) and (rt not in vidtags):
-						TagImport(url=cururl, tag=rt)
-						intags.append(rt)
-						cntinsert+=1
-				logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
+				if opts.rtag =='1':
+					cntinsert = 0
+					for rt in rtags:
+						if (rt not in intags) and (rt not in vidtags):
+							TagImport(url=cururl, tag=rt)
+							intags.append(rt)
+							cntinsert+=1
+					logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
 
-			if opts.tit =='1':
-				cntinsert = 0
-				for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
-					if (tt not in intags) and (tt not in vidtags):
-						TagImport(url=cururl, tag=rt)
-						intags.append(tt)
-						cntinsert+=1
-				logging.info(f'Вставлено тегов входящих в название: {cntinsert}')
+				if opts.tit =='1':
+					cntinsert = 0
+					for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
+						if (tt not in intags) and (tt not in vidtags):
+							TagImport(url=cururl, tag=rt)
+							intags.append(tt)
+							cntinsert+=1
+					logging.info(f'Вставлено тегов входящих в название: {cntinsert}')
 
-			# if opts.cross = '1':
-			# 	cntinsert = 0
-			# 	for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
-			# 		if (tt not in intags) and (tt not in vidtags):
-			# 			TagImport(url=cururl, tag=rt)
-			# 			intags.append(tt)
-			# 			cntinsert+=1
-			# 	logging.info(f'Вставлено тегов 1, 2, 7: {cntinsert}')
+				# if opts.cross = '1':
+				# 	cntinsert = 0
+				# 	for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
+				# 		if (tt not in intags) and (tt not in vidtags):
+				# 			TagImport(url=cururl, tag=rt)
+				# 			intags.append(tt)
+				# 			cntinsert+=1
+				# 	logging.info(f'Вставлено тегов 1, 2, 7: {cntinsert}')
+	else:
+		#входящие видео не указаны, берем все, которые есть в TagSEO
+		if opts.rtag =='1':
+			# получить список пар видео, ранжированный тег
+			cntinsert = getRankedTagsOnVideos()
+			logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
+		if opts.ztag =='1':
+			# получить список пар видео, нулевые теги
+			cntinsert = getZeroTagsOnVideos()
+			logging.info(f'Вставлено нулевых тегов: {cntinsert}')
+		if opts.ctag =='1':
+			# получить список пар видео, нулевые теги
+			cntinsert = getCloudTagsOnVideos()
+			logging.info(f'Вставлено рабочих тегов: {cntinsert}')
 	return 1
+
+def getCloudTagsOnVideos():
+	cntres = 0
+	with orm.db_session:
+		for vt in orm.select(vtag for vtag in TagSEO if vtag.seo > 6.8 and vtag.seo < 13.2).order_by(TagSEO.url):
+			TagImport(url=vt.url, tag=vt.tag, ttype='CLOUD')
+			cntres += 1
+	return cntres
+
+def getZeroTagsOnVideos():
+	cntres = 0
+	with orm.db_session:
+		for vt in orm.select(vtag for vtag in TagSEO if vtag.seo >= 13.2 or vtag.seo < 0.8).order_by(TagSEO.url):
+			TagImport(url=vt.url, tag=vt.tag, ttype='ZERO')
+			cntres += 1
+	return cntres
+
+def getRankedTagsOnVideos():
+	cntres = 0
+	with orm.db_session:
+		for vt in orm.select(vtag for vtag in TagSEO if vtag.ranked == 1).order_by(TagSEO.url):
+			TagImport(url=vt.url, tag=vt.tag, ttype='RANKED')
+			cntres += 1
+	return cntres
 
 def saveAnalytPg(opts):
 	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
@@ -1746,6 +1805,188 @@ def anl_savePg(drv, pgTab, videoId):
 	logging.info(f'Сохранена закладка {pgTab} в файле {flname}')
 def parseAnalytPg(opts):
 	pass
+
+def getSEOtags_V2(vid):
+	tgs=[]
+	tranked = []
+	with orm.db_session:
+		for tg in TagSEO.select(lambda t: t.vid==vid and t.real > 7.0).order_by(orm.raw_sql('real desc, length(tag)')):
+			#if tg.tag not in tgs:
+			tgs+=[tg.tag]
+			if tg.ranked > 0:
+				tranked.append(tg.tag)
+	return (tgs, tranked)
+
+def getRankedTags_V2(vid):
+	tgs=[]
+	with orm.db_session:
+		for tg in TagSEO.select(lambda t: t.vid==vid and t.real > 6.7 and t.real < 7.1 and t.ranked == 1).order_by(orm.raw_sql('real desc, seo desc, length(tag)')):
+			#if tg.tag not in tgs:
+			tgs+=[tg.tag]
+	return tgs
+
+def yt_len(pstr):
+	plen = 0
+	for ch in pstr:
+		plen+=2 if ch==' ' else 1
+	return plen
+
+def tagsUpdate_V2(drv, vid, url, o):
+	# вторая попытка улучшить алгоритм обновления облака тегов
+	svd = 0 # не привело к сохранению в видео ютюб
+	drv.get(url)
+	time.sleep(P100ms*20) # пауза 2
+	try:
+		testElm = WebDriverWait(drv, float(o.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-high-volume-ranked-tags"))
+	except TimeoutException:
+		logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+		
+	# сформировать предлагаемый перечень тегов для замены
+	(ntags, nrtags) = getSEOtags_V2(vid) # теги для видео удовлетворяющие условию отбора
+	logging.info('Ранжированных {} в общем облаке из {} тегов'.format(len(nrtags), len(ntags)))
+	rtags = getRankedTags_V2(vid) # ранжированные теги для видео
+	#curtags = []
+
+	# сохранить текущее состояние видео
+	vidSEO1 = getYTseo4Vid(drv)
+	logging.info('seo1: {}, real: {}, show: {}'.format(vidSEO1['seo'], vidSEO1['treal'], vidSEO1['tshow']))
+	
+	rtagStr = ''
+	rtagslen = 0
+	rcnt = 0
+	if len(rtags) > 0:
+		# начать формирование строки тегов
+		for t in rtags:
+			tlen = yt_len(t)
+			if rtagslen < 500 and rtagslen+tlen < 500 and rcnt < int(o.rtags):
+				rcnt += 1
+				rtagStr += ','+t
+				rtagslen +=  tlen + 1 #запятая
+			else:
+				break
+		logging.info('тегов ранжированных {}, длина {}'.format(rcnt, rtagslen))
+	
+	tagStr = ''
+	tagslen = 0
+	tcnt = 0
+	if tagslen < 540 and len(ntags) > 0 :
+		# дополнить строку тегов
+		for t in ntags:
+			tlen = yt_len(t)
+			if tagslen+tlen+1 < 520 - rtagslen:
+				tcnt += 1
+				tagStr += ','+t
+				tagslen +=  tlen + 1 #запятая
+			else:
+				break
+		logging.info('тегов общих {}, длина {}'.format(tcnt, tagslen))
+		tagStr += ',' + rtagStr
+		tagslen = yt_len(tagStr)
+		logging.info('тегов {}, длина {} '.format(tcnt+rcnt, tagslen))
+		#tagStr += ',техно1,техно2' # перед вставкой добавляем для получения новых результатов плагина
+		inp = drv.find_element_by_id('text-input')
+		clearAlltags(drv, inp)
+		inp.click()
+		pyperclip.copy(tagStr)
+		time.sleep(PMIN)
+		# вставить новую строку тегов
+		#inp.send_keys(Keys.CONTROL, 'v')
+		inp.send_keys(Keys.SHIFT, Keys.INSERT)
+		time.sleep(P100ms*20)
+		# проверить длинну <div slot="description" id="tags-count" class="style-scope ytcp-video-metadata-basics">155/500</div>
+		tlen = 501
+		while tlen > 500:
+			# откорректировать длинну
+			tagslength = drv.find_element_by_id('tags-count')
+			#logging.info('tags-count: {}'.format(tagslength.text))
+			chcnt = tagslength.text.split('/')
+			#logging.info('tags-count: {}'.format(chcnt[0]))
+			tlen = int(chcnt[0])
+			logging.info(f'длина облака тегов {tlen}')
+			if tlen > 500:
+				delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+				if len(delbtns) > 0:
+					delbtns[-(rcnt+1)].click()
+	else:
+		logging.info('Нет слов для формирования строки тегов. Работаем с текущими')
+		# вставлять нечего, далее работаем с тем, что есть
+
+	# получить текущее состояние видео
+	time.sleep(P100ms*30)
+	vidSEO2 = getYTseo4Vid(drv)
+	logging.info('seo2: {}, real2: {}, show2: {}'.format(vidSEO2['seo'], vidSEO2['treal'], vidSEO2['tshow']))
+	
+	#если рейтинг выше, то сохранить
+	if (vidSEO2['treal'] > 49.99) or ((vidSEO2['treal'] > vidSEO1['treal']) and (vidSEO1['tshow']<0.1 or vidSEO2['tshow'] > vidSEO1['tshow'])):
+		logging.info('!!! {:05.2f} >= {:05.2f} SAVE, seo2: {}, seo1: {}, show2: {}, show1: {}'.format(float(vidSEO2['treal']), float(vidSEO1['treal']), vidSEO2['seo'], vidSEO1['seo'], vidSEO2['tshow'], vidSEO1['tshow']))
+		# save this
+		svd = 1
+		elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
+		if len(elms)>0:
+			elms[0].click()
+			time.sleep(PMIN)
+	
+	# продолжаем улучшать, пробуем удалять по одному тегу, возможно найдем более высокое значение рейтинга
+	todo = True if vidSEO2['treal'] < 50 else False
+	fup = 0
+	fdown = 0
+	iteration = 0
+	vidSEOlast = vidSEO2.copy()
+	while todo and iteration < 100 and fdown < 1 and fup < 2:
+		iteration+=1
+		tlen = readTagsLen(drv)
+		deltrue = False
+		deltag = ''
+		if tlen > 0:
+			#пытаемся удалить последний тег
+			delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+			if len(delbtns) > 0:
+				parentelm = delbtns[-1].find_element_by_xpath("./..")
+				deltag = parentelm.get_attribute('vidiq-keyword')
+				delbtns[-1].click()
+				time.sleep(P100ms*20)
+				deltrue = True
+
+		vidSEOcur = getYTseo4Vid(drv)
+		if deltrue:
+			logging.info('удаляем тег: {}, seo: {}, real: {}, show: {}'.format(deltag,
+						vidSEOcur['seo'], vidSEOcur['treal'], vidSEOcur['tshow']))
+
+		if ( vidSEOlast['treal'] > vidSEOcur['treal'] ): #and ( abs(vidSEOlast['tshow'] - vidSEOcur['tshow']) <0.1 ):
+			# уменьшился рейтинг после удаления тега - отменяем и завершаем подбор
+			fdown +=1
+			logging.info('--- {:05.2f} < {:05.2f} DISCARD'.format(float(vidSEOcur['treal']), float(vidSEOlast['treal'])))
+			vidSEOlast = vidSEOcur.copy()
+
+		elif ( vidSEOlast['treal'] < vidSEOcur['treal']) and (vidSEO1['treal'] <= vidSEOcur['treal']):
+			# сохранить и продолжить удалять до следующего изменения
+			svd = 1
+			fup +=1
+			logging.info('!!! {:05.2f} > {:05.2f} SAVE {}'.format(float(vidSEOcur['treal']), float(vidSEOlast['treal']), fup))
+			elms=drv.find_elements_by_xpath("//ytcp-button[@id='save']") #driver.find_element_by_id('save')
+			if len(elms)>0:
+				elms[0].click()
+				time.sleep(PMIN)
+			todo = True if vidSEOcur['treal'] < 50 else False
+			vidSEOlast = vidSEOcur.copy()
+
+	if fdown > 0:
+		# cancel
+		#logging.info(' :( discard, seo2 {:05.2f} =< {:05.2f} seo1.'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+		btn=drv.find_element_by_id('discard')
+		btn.click()
+		
+
+	# сохранить рейтинг в БД
+	time.sleep(P100ms*30) #пауза 3
+	vidSEO2 = getYTseo4Vid(drv)
+	if float(vidSEO2['treal']) > float(vidSEO1['treal']):
+		logging.info('!!! текущий seo: {:05.2f} > старого {:05.2f}, show2: {}, show1: {}'.format(float(vidSEO2['treal']), float(vidSEO1['treal']), vidSEO2['tshow'], vidSEO1['tshow']))
+	elif float(vidSEO2['treal']) <= float(vidSEO1['treal']):
+		logging.info('текущий seo: {:05.2f} <= старому {:05.2f}'.format(float(vidSEO2['treal']), float(vidSEO1['treal'])))
+	
+	saveSEOupdate(vid, [vidSEO1, vidSEO2], svd)
+
 
 def testfunc(opts):
 	
@@ -1812,7 +2053,11 @@ if __name__ == '__main__':
 	parser.add_argument('--test',help='test func', default='-')
 	parser.add_argument('--truncate',help='truncate TagImport', default='-')
 	parser.add_argument('--rtag',help='ranked tags for TagImport', default='-')
+	parser.add_argument('--ztag',help='zero and unnotmaly hi tags for TagImport', default='-')
+	parser.add_argument('--ctag',help='cloud tags for TagImport', default='-')
 	parser.add_argument('--tit',help='tags in video title for TagImport', default='-')
+	parser.add_argument('--rtags',help='ranked tags count', default='-')
+	
 	args = parser.parse_args()
 	started_at = time.monotonic()
 	if args.tags == '0':
