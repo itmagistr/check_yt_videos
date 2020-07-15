@@ -1987,6 +1987,87 @@ def tagsUpdate_V2(drv, vid, url, o):
 	
 	saveSEOupdate(vid, [vidSEO1, vidSEO2], svd)
 
+def BackupZeroTags(opts):
+	logging.info('Подготавливаем перемещение нулевых тегов в архивную таблицу')
+	cnt = 0
+	with orm.db_session():
+		ztags = TagSEO.select(lambda x: x.seo < 6.8).order_by(TagSEO.url)
+		ztagslen = len(ztags)
+		logging.info(f'Отобрано для перемещения в архивную таблицу {ztagslen}')
+		for zt in ztags:
+			cnt +=1
+			#logging.info(f'vid={zt.vid}, tag={zt.tag}')
+			indx=0
+			for at in TagSEOArch.select(lambda x: x.vid==zt.vid and x.tag==zt.tag):
+				indx+=1
+				at.delete()
+				#logging.info(f'{indx} vid={at.vid}, tag={at.tag}')
+			at = TagSEOArch(dt=zt.dt, vid=zt.vid, url=zt.url,
+							tag=zt.tag, seo=zt.seo, real=zt.real,
+							tcount=zt.tcount, tpopular=zt.tpopular, tintitle=zt.tintitle,
+							tindesc=zt.tindesc, triple=zt.triple, tshow=zt.tshow,
+							ranked=zt.ranked, hivolume=zt.hivolume, data=zt.data
+							)
+			# else:
+			# 	if zt.dt > at.dt:
+			# 		at.set(dt = zt.dt,
+			# 				seo = zt.seo,
+			# 				real = zt.real,
+			# 				tcount = zt.tcount,
+			# 				tpopular = zt.tpopular,
+			# 				tintitle = zt.tintitle,
+			# 				tindesc = zt.tindesc,
+			# 				triple = zt.triple,
+			# 				tshow = zt.tshow,
+			# 				ranked = zt.ranked,
+			# 				hivolume = zt.hivolume,
+			# 				data = zt.data
+			# 			)
+			zt.delete()
+			if str(cnt)[-1] == '0':
+				logging.info(f'удаленных записей {cnt}')
+				orm.flush()
+	logging.info(f'удаленных записей {cnt}')
+	return 1
+def RestoreZeroTags(opts):
+	logging.info('Подготавливаем перемещение нулевых тегов в основную таблицу')
+	cnt = 0
+	with orm.db_session():
+		ztags = TagSEOArch.select().order_by(TagSEOArch.url)
+		ztagslen = len(ztags)
+		logging.info(f'Отобрано для перемещения в основную таблицу {ztagslen}')
+		for zt in ztags:
+			cnt +=1
+			#logging.info(f'vid={zt.vid}, tag={zt.tag}')
+			indx=len(TagSEO.select(lambda x: x.vid==zt.vid and x.tag==zt.tag))
+			if indx == 0:
+				at = TagSEO(dt=zt.dt, vid=zt.vid, url=zt.url,
+								tag=zt.tag, seo=zt.seo, real=zt.real,
+								tcount=zt.tcount, tpopular=zt.tpopular, tintitle=zt.tintitle,
+								tindesc=zt.tindesc, triple=zt.triple, tshow=zt.tshow,
+								ranked=zt.ranked, hivolume=zt.hivolume, data=zt.data
+								)
+			# else:
+			# 	if zt.dt > at.dt:
+			# 		at.set(dt = zt.dt,
+			# 				seo = zt.seo,
+			# 				real = zt.real,
+			# 				tcount = zt.tcount,
+			# 				tpopular = zt.tpopular,
+			# 				tintitle = zt.tintitle,
+			# 				tindesc = zt.tindesc,
+			# 				triple = zt.triple,
+			# 				tshow = zt.tshow,
+			# 				ranked = zt.ranked,
+			# 				hivolume = zt.hivolume,
+			# 				data = zt.data
+			# 			)
+			zt.delete()
+			if str(cnt)[-1] == '0':
+				logging.info(f'восстановленных записей {cnt}')
+				orm.flush()
+	logging.info(f'Завершено. Восстановленных записей {cnt}')
+	return 1
 
 def testfunc(opts):
 	
@@ -2057,9 +2138,11 @@ if __name__ == '__main__':
 	parser.add_argument('--ctag',help='cloud tags for TagImport', default='-')
 	parser.add_argument('--tit',help='tags in video title for TagImport', default='-')
 	parser.add_argument('--rtags',help='ranked tags count', default='-')
+	parser.add_argument('--arch',help='process operations backup/restore zero tags', default='-')
 	
 	args = parser.parse_args()
 	started_at = time.monotonic()
+	print(args.arch)
 	if args.tags == '0':
 		check_list(args)
 	elif args.tags == '1':
@@ -2076,6 +2159,10 @@ if __name__ == '__main__':
 		importTags(args) # go 1378
 	elif args.add == '3':
 		PrepareTags(args) # go 1628
+	elif args.arch == 'b':
+		BackupZeroTags(args) # go 1990
+	elif args.arch == 'r':
+		RestoreZeroTags(args) # go 
 	elif args.test == '1':
 		testfunc(args)
 	else:
