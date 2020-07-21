@@ -1655,108 +1655,179 @@ def PrepareTags(opts):
 		with orm.db_session:
 			db.execute('DELETE FROM TagImport;')
 			#db.execute('VACUUM;')
+	# по списку видео из файла или по всем видео в таблице
 	if len(opts.infile) > 1:
-		# read videos in videos
+		# read videos from infile
 		urls=loadUrls(opts.infile)
-		urlslen = len(urls.keys())
-		logging.info('Подготовлено {} видео для анализа'.format(urlslen))
-	
-		imptags = [] # [(url, tag)]
-		rtags = []
-		
-		if opts.rtag =='1':
-			with orm.db_session:
-				tags = orm.select(x for x in TagSEO if x.seo > 0)
-				for t in tags:
-					if str(int(round(100*t.seo)))[-1] in '13':
-						rtags.append(t.tag)
-				#logging.info(f'rtags={rtags}')
-				lenrtags = len(rtags)
-				logging.info(f'Ранжированных тегов {lenrtags}')
+	else:
+		urls = []
+		# read videos from table TagSEO
+		for v in orm.select((vtag.vid, vtag.url) for vtag in TagSEO):
+			urls.append({v[0]: v[1]})
+	urlslen = len(urls.keys())
+	logging.info('Подготовлено {} видео для анализа'.format(urlslen))
 
-		# пройдем по видео
-		cnt = 0
-		for v in urls:
-			cnt+=1
-			intags = []
-			cururl = urls[v]
+	rtags = [] # список ранжированных тегов
+	rvtags = {} # список ранжированных тегов с группировкой под видео
+	atags = [] # список тегов для проверки в названии
+	ztags = [] # список нулевых тегов
+	zvtags = {}
+	ctags = [] # список рабочих тегов
+	cvtags = {}
 
-			logging.info(f'{cnt}/{urlslen}, Вставка тегов для видео {cururl}')
-			with orm.db_session:
-				vidtags = [tg.tag for tg in TagSEO.select(lambda x: x.url==cururl)]
-				# прочитать название видео
-				cd = CheckData.get(url=cururl)
-				if cd is not None:
-					vidtitle = cd.data['title']
+	# очистка таблицы
+	if len(opts.addtags) > 2:
+		tagsIN=loadTags(opts.addtags)
+		tagslen = len(tagsIN)
+
+	# ранжированные теги
+	if opts.rtag == '1': # сформировать списки ранжированных с группировкой под видео
+		lasturl = '-'
+		with orm.db_session:
+			vrtags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo > 0 and x.ranked > 0).distinct().order_by(orm.raw_sql("vid"))
+			lenrtags = len(vrtags)
+			for qt in vrtags:
+				cururl = qt[1]
+				if lasturl == cururl:
+					rvtags[cururl].append(qt[2])
 				else:
-					vidtitle = ''
-				logging.info(f'название видео: {vidtitle}')
+					rvtags[cururl] = [qt[2]]
+					lasturl = cururl
+			logging.info(f'Ранжированных тегов под видео {lenrtags}')
+			#logging.info(f'{rvtags}')
+	elif opts.rtag == '2': # сформировать список ранжированных тегов по всей таблице
+		with orm.db_session:
+			rtags = orm.select(x.tag for x in TagSEO if x.seo > 0 and x.ranked > 0)
+			lenrtags = len(rtags)
+			logging.info(f'Ранжированных тегов {lenrtags}')
 
-				if opts.rtag =='1':
-					cntinsert = 0
-					for rt in rtags:
-						if (rt not in intags) and (rt not in vidtags):
-							TagImport(url=cururl, tag=rt)
-							intags.append(rt)
-							cntinsert+=1
-					logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
+	# все теги для выявления вхождения в название
+	if opts.ttag in '12': # не применимо, в любом случае необходимо сформировать список слов из всех тегов
+		with orm.db_session:
+			atags = orm.select(tt.tag for tt in TagSEO).distinct().order_by(orm.raw_sql("LENGTH(tag) desc"))
+			lenrtags = len(atags)
+			logging.info(f'Уникальных в текущей таблице тегов {lenrtags}')
 
-				if opts.tit =='1':
+	# нулевые теги
+	if opts.ztag == '1': # сформировать списки нулевых с группировкой под видео
+		lasturl = '-'
+		with orm.db_session:
+			vztags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo >= 13.2 or x.seo < 0.8).distinct().order_by(orm.raw_sql("vid"))
+			lenztags = len(vztags)
+			for qt in vztags:
+				cururl = qt[1]
+				if lasturl == cururl:
+					zvtags[cururl].append(qt[2])
+				else:
+					zvtags[cururl] = [qt[2]]
+					lasturl = cururl
+			logging.info(f'Нулевых тегов под видео {lenztags}')
+			logging.info(f'{zvtags}')
+	elif opts.ztag == '2': # сформировать список ранжированных тегов по всей таблице
+		with orm.db_session:
+			ztags = orm.select(x.tag for x in TagSEO if x.seo >= 13.2 or x.seo < 0.8)
+			lenztags = len(ztags)
+			logging.info(f'Нулевых тегов {lenztags}')
+	
+	# рабочие теги			
+	if opts.ctag == '1': # сформировать списки нулевых с группировкой под видео
+		lasturl = '-'
+		with orm.db_session:
+			vctags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo > 6.8 and x.seo < 13.2).distinct().order_by(orm.raw_sql("vid"))
+			lenсtags = len(vctags)
+			for qt in vctags:
+				cururl = qt[1]
+				if lasturl == cururl:
+					cvtags[cururl].append(qt[2])
+				else:
+					cvtags[cururl] = [qt[2]]
+					lasturl = cururl
+			logging.info(f'Рабочих тегов под видео {lenсtags}')
+			#logging.info(f'{cvtags}')
+	elif opts.ctag == '2': # сформировать список ранжированных тегов по всей таблице
+		with orm.db_session:
+			ctags = orm.select(x.tag for x in TagSEO if x.seo > 6.8 and x.seo < 13.2)
+			lenсtags = len(ctags)
+			logging.info(f'Рабочих тегов {lenсtags}')
+
+
+	# пройдем по видео
+	cnt = 0
+	started_at_video = time.monotonic()
+	for v in urls:
+		cnt+=1
+		intags = []
+		cururl = urls[v]
+		
+		logging.info('--------------------------------------------------')
+		resttime = (urlslen - cnt) * (time.monotonic() - started_at_video) / cnt
+		resttimestr = time.strftime('%H:%M:%S', time.gmtime(resttime))
+		logging.info(f'{cnt}/{urlslen}, осталось {resttimestr}, Вставка тегов для видео {cururl}')
+		with orm.db_session:
+			#vidtags = [tg.tag for tg in TagSEO.select(lambda x: x.url==cururl)]
+			# прочитать название видео
+			cd = CheckData.get(url=cururl)
+			if cd is not None:
+				vidtitle = cd.data['title'].lower()
+			else:
+				vidtitle = '-'
+				logging.info(' -- Для анализа названия видео требуется выполнить анализ Чек-листа')
+			logging.info(f'название видео: {vidtitle}')
+			
+			if len(opts.addtags) > 2:
+				cntinsert = 0
+				for t in tagsIN:
+					TagImport(url=cururl, tag=t, ttype='ADDED')
+					cntinsert+=1
+				logging.info(f'Вставлено добавочных тегов: {cntinsert}')
+			
+			if opts.rtag in '12':
+				cntinsert = 0
+				if opts.rtag == '1':
+					rtags = rvtags[cururl] if cururl in rvtags.keys() else []
+				for t in rtags:
+					TagImport(url=cururl, tag=t, ttype='RANKED')
+					cntinsert+=1
+				logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
+
+			if opts.ztag in '12':
+				cntinsert = 0
+				if opts.ztag == '1':
+					ztags = zvtags[cururl] if cururl in zvtags.keys() else []
+				for t in ztags:
+					TagImport(url=cururl, tag=t, ttype='ZERO')
+					cntinsert+=1
+				logging.info(f'Вставлено нулевых тегов: {cntinsert}')
+
+			if opts.ctag in '12':
+				cntinsert = 0
+				if opts.ctag == '1':
+					ctags = cvtags[cururl]  if cururl in cvtags.keys() else []
+				for t in ctags:
+					TagImport(url=cururl, tag=t, ttype='CLOUD')
+					cntinsert+=1
+				logging.info(f'Вставлено рабочих тегов: {cntinsert}')
+
+			if opts.ttag in '12':
+				if vidtitle =='-':
+					logging.info(f'Требуется запустить режим сбора чек-листа для видео {cururl}')
+				else:
 					cntinsert = 0
-					for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
-						if (tt not in intags) and (tt not in vidtags):
-							TagImport(url=cururl, tag=rt)
-							intags.append(tt)
-							cntinsert+=1
+					vidtitle = vidtitle.lower()
+					for tt in atags:
+						tg = tt.lower()
+						#logging.info(f'{tg} в {vidtitle}')
+						if tg in vidtitle:
+							TagImport(url=cururl, tag=tt, ttype='TITLED')
+							vidtitle = vidtitle.replace(tg, '')
+							cntinsert += 1
+						if len(vidtitle) < 4:
+							break
 					logging.info(f'Вставлено тегов входящих в название: {cntinsert}')
 
-				# if opts.cross = '1':
-				# 	cntinsert = 0
-				# 	for tt in orm.select( x.tag for x in TagSEO if x.tag in vidtitle):
-				# 		if (tt not in intags) and (tt not in vidtags):
-				# 			TagImport(url=cururl, tag=rt)
-				# 			intags.append(tt)
-				# 			cntinsert+=1
-				# 	logging.info(f'Вставлено тегов 1, 2, 7: {cntinsert}')
-	else:
-		#входящие видео не указаны, берем все, которые есть в TagSEO
-		if opts.rtag =='1':
-			# получить список пар видео, ранжированный тег
-			cntinsert = getRankedTagsOnVideos()
-			logging.info(f'Вставлено ранжированных тегов: {cntinsert}')
-		if opts.ztag =='1':
-			# получить список пар видео, нулевые теги
-			cntinsert = getZeroTagsOnVideos()
-			logging.info(f'Вставлено нулевых тегов: {cntinsert}')
-		if opts.ctag =='1':
-			# получить список пар видео, нулевые теги
-			cntinsert = getCloudTagsOnVideos()
-			logging.info(f'Вставлено рабочих тегов: {cntinsert}')
+
 	return 1
 
-def getCloudTagsOnVideos():
-	cntres = 0
-	with orm.db_session:
-		for vt in orm.select(vtag for vtag in TagSEO if vtag.seo > 6.8 and vtag.seo < 13.2).order_by(TagSEO.url):
-			TagImport(url=vt.url, tag=vt.tag, ttype='CLOUD')
-			cntres += 1
-	return cntres
-
-def getZeroTagsOnVideos():
-	cntres = 0
-	with orm.db_session:
-		for vt in orm.select(vtag for vtag in TagSEO if vtag.seo >= 13.2 or vtag.seo < 0.8).order_by(TagSEO.url):
-			TagImport(url=vt.url, tag=vt.tag, ttype='ZERO')
-			cntres += 1
-	return cntres
-
-def getRankedTagsOnVideos():
-	cntres = 0
-	with orm.db_session:
-		for vt in orm.select(vtag for vtag in TagSEO if vtag.ranked == 1).order_by(TagSEO.url):
-			TagImport(url=vt.url, tag=vt.tag, ttype='RANKED')
-			cntres += 1
-	return cntres
 
 def saveAnalytPg(opts):
 	(wb, wss, wsd, wst, newWBfile) = tags_openxls(opts.infile)
@@ -2136,7 +2207,7 @@ if __name__ == '__main__':
 	parser.add_argument('--rtag',help='ranked tags for TagImport', default='-')
 	parser.add_argument('--ztag',help='zero and unnotmaly hi tags for TagImport', default='-')
 	parser.add_argument('--ctag',help='cloud tags for TagImport', default='-')
-	parser.add_argument('--tit',help='tags in video title for TagImport', default='-')
+	parser.add_argument('--ttag',help='tags in video title for TagImport', default='-')
 	parser.add_argument('--rtags',help='ranked tags count', default='-')
 	parser.add_argument('--arch',help='process operations backup/restore zero tags', default='-')
 	
