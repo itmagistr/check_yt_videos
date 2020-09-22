@@ -701,6 +701,7 @@ def getVideoList(opts):
 	tstr = ''
 	# step 2 - получить список плейлистов
 	######################################
+	logging.info("Получаем список плейлистов канала")
 	request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID) 
 	response = request.execute()
 	playlists.extend(response["items"])
@@ -711,10 +712,12 @@ def getVideoList(opts):
 		npage+=1
 		playlists.extend(response["items"])
 	#logging.info(playlists)
-	
+	logging.info("Получена информация о {} плейлистах канала".format(len(playlists)))
 	plvideos = []
+	npage = 0
 	for pl in playlists:
-		npage = 1
+		npage+=1
+		logging.info("Запрос списка видео плейлиста {} из {}".format(npage, len(playlists)))
 		request = youtube.playlistItems().list(
 			part="snippet", 
 			maxResults=50,
@@ -722,12 +725,14 @@ def getVideoList(opts):
 		)
 		response = request.execute()
 		totalResults = response["pageInfo"]["totalResults"]
-		
-		#logging.info(response['items'])
-		
+		logging.info(f'Предстоит получить информацию о {totalResults} видео')
 		for itm in response["items"]:
-			plvideos.extend([itm["snippet"]])
-		
+			#plvideos.extend([itm["snippet"]])
+			req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
+			resp = req.execute()
+			for elm in resp["items"]:
+				plvideos.extend([elm])
+			
 		while 'nextPageToken' in response:# and response["nextPageToken"] is not None:
 			npToken = response.get('nextPageToken','not Found')
 			
@@ -740,7 +745,12 @@ def getVideoList(opts):
 			response = request.execute()
 			#logging.info(response['items'])
 			for itm in response["items"]:
-				plvideos.extend([itm["snippet"]]) # накапливаем список видео, обновляем характеристики видео, далее собираемтолько статистику
+				#plvideos.extend([itm["snippet"]]) # накапливаем список видео, обновляем характеристики видео, далее собираем только статистику
+				req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
+				resp = req.execute()
+				for elm in resp["items"]:
+					plvideos.extend([elm])
+
 	#plvideos["channelId"]
 	#plvideos["resourceId"]["videoId"]
 	yturls=[]
@@ -749,26 +759,74 @@ def getVideoList(opts):
 			for line in infl.readlines():
 				if 'youtube.com' in line:
 					yturls.append(line.strip())
+	
 	res = getFilename(opts)
-	with open(res, 'w') as fl:
-		# if opts.chvideos=='1':
-		# 	for v in plvideos:
-		# 		if v["channelId"] == opts.chID:
-		# 			fl.writelines(['{};https://youtube.com/watch?v={}\n'.format(v["channelId"], v["resourceId"]["videoId"])])
-		# else:
-		if len(yturls) > 0:
-			for v in plvideos:
-				url = 'https://youtube.com/watch?v={}'.format(v["resourceId"]["videoId"])
-				if url not in yturls:
-					fl.writelines([url+'\n'])
-		else:
-			fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
+	if opts.xls == '1':
+		wb = openpyxl.Workbook()
+		ws = wb.active
+		ws.title = "Видео"
+		cr = 1
+		ws.cell(row=cr, column=1, value='channel')
+		ws.cell(row=cr, column=2, value='url')
+		ws.cell(row=cr, column=3, value='short description')
+		ws.cell(row=cr, column=4, value='zero time exists')
+		ws.cell(row=cr, column=5, value='zero time hashtag exists')
+		ws.cell(row=cr, column=6, value='title')
+		ws.cell(row=cr, column=7, value='description')
+
+
+		for v in plvideos:
+			cr+=1
+			ws.cell(row=cr, column=1, value=v["snippet"]["channelTitle"])
+			ws.cell(row=cr, column=2, value='https://youtube.com/watch?v={}'.format(v["id"]))
+			ws.cell(row=cr, column=3, value=shortdescription(v["snippet"]["title"], v["snippet"]["description"], int(opts.short)))
+			ws.cell(row=cr, column=4, value=zerotime_exists(v["snippet"]["description"]))
+			ws.cell(row=cr, column=5, value=zerotimehashtag_exists(v["snippet"]["description"]))
+			ws.cell(row=cr, column=6, value=v["snippet"]["title"])
+			ws.cell(row=cr, column=7, value=v["snippet"]["description"])
+			
+
+		wb.save(res)
+	else:
+		with open(res, 'w', encoding='utf-8') as fl:
+			# if opts.chvideos=='1':
+			# 	for v in plvideos:
+			# 		if v["channelId"] == opts.chID:
+			# 			fl.writelines(['{};https://youtube.com/watch?v={}\n'.format(v["channelId"], v["resourceId"]["videoId"])])
+			# else:
+			
+			if len(yturls) > 0:
+				for v in plvideos:
+					url = 'https://youtube.com/watch?v={}'.format(v["resourceId"]["videoId"])
+					if url not in yturls:
+						fl.writelines([url+'\n'])
+			else:
+				fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
 	return res
 
 def getFilename(opts):
-	res='{}_{}.txt'.format(opts.outflname, datetime.datetime.now().strftime('%y%m%d_%H%M'))
+	if opts.xls == '1':
+		res='{}_{}.xlsx'.format(opts.outflname, datetime.datetime.now().strftime('%y%m%d_%H%M'))
+	else:
+		res='{}_{}.txt'.format(opts.outflname, datetime.datetime.now().strftime('%y%m%d_%H%M'))
 	return res
 
+def shortdescription(t, d, slen=100):
+	res = False
+	if (t == d) or (len(d) < slen):
+		res = True
+	return res
+
+def zerotime_exists(d):
+	res = False
+	if '00:00' in d:
+		res = True
+	return res
+def zerotimehashtag_exists(d):
+	res = False
+	if ('00:00' in d) and ('#' in d):
+		res = True
+	return res
 #------------------------------------- from check_yt_videos.py --------------------
 def tags_openxls(flname):	
 	logging.info(f'Чтение списка ссылок из файла {flname}')
@@ -1257,7 +1315,10 @@ def getVidTags4Import(indt):
 				tag_seo = -1
 				# запросить в БД
 				for ts in orm.select((ts.tag, orm.raw_sql('avg(seo)')) for ts in TagSEO if ts.tag == tag):
-					tag_seo = ts[1]
+					if ts[1] is not None:
+						tag_seo = ts[1]
+					else:
+						tag_seo = -1
 				avgTags[tag] = tag_seo
 			else:
 				# прочитать сохраненное значение
@@ -2248,7 +2309,25 @@ def tagsUpdate_V3(drv, vid, url, o):
 
 	# получить текущее состояние видео
 	time.sleep(P100ms*30)
+	cnt_retry = 1
 	vidSEO2 = getYTseo4Vid(drv)
+	while vidSEO2['seo'] < 0.01 and cnt_retry < 5:
+		cnt_retry += 1
+		# если не успело значение обновиться, то вставляем тег, ожидаем, удаляем, читаем повторно
+		inp = drv.find_element_by_id('text-input')
+		inp.click()
+		pyperclip.copy('экономика')
+		time.sleep(PMIN)
+		inp.send_keys(Keys.SHIFT, Keys.INSERT)
+		time.sleep(P100ms * 30)  # пауза 2
+		delbtns = drv.find_elements_by_xpath("//ytcp-icon-button[@id='delete-icon']")
+		if len(delbtns) > 0:
+			delbtns[-1].click()
+		time.sleep(P100ms * 30)  # пауза 2
+		# get SEO score
+		vidSEO2 = getYTseo4Vid(drv)
+
+	#vidSEO2 = getYTseo4Vid(drv)
 	logging.info('seo2: {}, real2: {}, show2: {}'.format(vidSEO2['seo'], vidSEO2['treal'], vidSEO2['tshow']))
 	
 	#если рейтинг выше, то сохранить
@@ -2476,6 +2555,8 @@ if __name__ == '__main__':
 	parser.add_argument('--arch',help='process operations backup/restore zero tags', default='-')
 	parser.add_argument('--slim',help='break tag estimation when big >510 and count of ranked == 5', default='0')
 	parser.add_argument('--wordsintitle',help='ranked tag will be estimated if wordsintitle words exists in title string', default='0')
+	parser.add_argument('--xls',help='to process excel file', default='-')
+	parser.add_argument('--short',help='to process excel file', default='100')
 
 	args = parser.parse_args()
 	started_at = time.monotonic()
