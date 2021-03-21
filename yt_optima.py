@@ -26,8 +26,11 @@ logging.getLogger().setLevel(logging.INFO)
 logging.getLogger('googleapicliet.discovery_cache').setLevel(logging.CRITICAL)
 logging.getLogger().addHandler(logging.FileHandler("yt_optima.log"))
 
-P100ms = 0.05 # базовая пауза. Остальные паузы указаны кратными базовой
-PMIN = 10*P100ms # минимальная пауза для прорисовки пользовательского интерфейса
+P100ms = 0.20    # 0.05-0.20 - базовая пауза. Остальные паузы указаны кратными базовой
+PMIN = 10*P100ms # 10* - минимальная пауза для прорисовки пользовательского интерфейса
+MinScore =  0.8   # минимальное  значение тега для включения в рабочее облако
+WrkScore =  6.8   # начало рабочего диапазона тегов, лучше привести к 7.1
+MaxScore = 32.0   # максимальное значение тега для включения в рабочее облако
 
 FLTYPE={'Обзор': {'litera': 'ov',},
 		'Просмотры': {'litera': 'v',},
@@ -556,7 +559,7 @@ def getScores(dr, tdata):
 	try:
 		elm=dr.find_element_by_class_name('stat-value-high-volume-ranked-tags')
 		elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
-		tdata['hivolume'] = int(elm1.text)
+		tdata['hivolume'] = float(elm1.text)
 	except:
 		logging.info("stat-value-high-volume-ranked-tags Unexpected error: {}".format(sys.exc_info()[0]))
 
@@ -597,7 +600,7 @@ def getYTseo4Vid(drv):
 	try:
 		elm=drv.find_element_by_class_name('stat-value-high-volume-ranked-tags')
 		elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
-		thivolume = int(elm1.text)
+		thivolume = float(elm1.text)
 	except:
 		logging.info("stat-value-high-volume-ranked-tags Unexpected error: {}".format(sys.exc_info()[0]))
 
@@ -797,11 +800,19 @@ def getVideoList(opts):
 			
 			if len(yturls) > 0:
 				for v in plvideos:
+<<<<<<< Updated upstream
 					url = 'https://youtube.com/watch?v={}'.format(v["resourceId"]["videoId"])
 					if url not in yturls:
 						fl.writelines([url+'\n'])
 			else:
 				fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
+=======
+					url = 'https://youtube.com/watch?v={}'.format(v["id"])
+					if url not in yturls:
+						fl.writelines([url+'\n'])
+			else:
+				fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["id"]) for v in plvideos])
+>>>>>>> Stashed changes
 	return res
 
 def getFilename(opts):
@@ -1027,7 +1038,7 @@ def check_list(opts):
 				elm1 = elm.find_elements_by_xpath(".//span[@class='value-inner']")[0]
 				#logging.info('undefined {}'.format(elm1.text))
 				if isxls:
-					wsd.cell(row=crow, column=13, value=int(elm1.text))
+					wsd.cell(row=crow, column=13, value=float(elm1.text))
 				cdata['volume-ranked-tags'] = elm1.text
 			except:
 				logging.info("stat-value-high-volume-ranked-tags Unexpected error: {}".format(sys.exc_info()[0]))
@@ -1412,9 +1423,9 @@ def tags_write2xls(ws, crow, data):
 	ws.cell(row=crow, column=8, value=int(data["keywords-in-title"]) if 'keywords-in-title' in data else '')
 	ws.cell(row=crow, column=9, value=int(data["keywords-in-description"]) if 'keywords-in-description' in data else '')
 	ws.cell(row=crow, column=10, value=int(data["tripled-keywords"]) if 'tripled-keywords' in data else '')
-	ws.cell(row=crow, column=11, value=int(data["stat-value2"]) if 'stat-value2' in data else '')
-	ws.cell(row=crow, column=12, value=int(data["ranked-tags"]) if 'ranked-tags' in data else '')
-	ws.cell(row=crow, column=13, value=int(data['volume-ranked-tags']) if 'volume-ranked-tags' in data else '')
+	ws.cell(row=crow, column=11, value=float(data["stat-value2"]) if 'stat-value2' in data else '')
+	ws.cell(row=crow, column=12, value=float(data["ranked-tags"]) if 'ranked-tags' in data else '')
+	ws.cell(row=crow, column=13, value=float(data['volume-ranked-tags']) if 'volume-ranked-tags' in data else '')
 	
 	for i in range(14,24):
 		key = 'chl-{}'.format(i)
@@ -1842,7 +1853,7 @@ def PrepareTags(opts):
 	if opts.ztag == '1': # сформировать списки нулевых с группировкой под видео
 		lasturl = '-'
 		with orm.db_session:
-			vztags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo >= 13.2 or x.seo < 0.8).distinct().order_by(orm.raw_sql("vid"))
+			vztags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo >= MaxScore or x.seo < MinScore).distinct().order_by(orm.raw_sql("vid"))
 			lenztags = len(vztags)
 			for qt in vztags:
 				cururl = qt[1]
@@ -1855,7 +1866,7 @@ def PrepareTags(opts):
 			#logging.info(f'{zvtags}')
 	elif opts.ztag == '2': # сформировать список ранжированных тегов по всей таблице
 		with orm.db_session:
-			ztags = orm.select(x.tag for x in TagSEO if x.seo >= 13.2 or x.seo < 0.8)
+			ztags = orm.select(x.tag for x in TagSEO if x.seo >= MaxScore or x.seo < MinScore)
 			lenztags = len(ztags)
 			logging.info(f'Нулевых тегов {lenztags}')
 	
@@ -1863,7 +1874,7 @@ def PrepareTags(opts):
 	if opts.ctag == '1': # сформировать списки нулевых с группировкой под видео
 		lasturl = '-'
 		with orm.db_session:
-			vctags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo > 6.8 and x.seo < 13.2).distinct().order_by(orm.raw_sql("vid"))
+			vctags = orm.select((x.vid, x.url, x.tag) for x in TagSEO if x.seo > WrkScore and x.seo < MaxScore).distinct().order_by(orm.raw_sql("vid"))
 			lenсtags = len(vctags)
 			for qt in vctags:
 				cururl = qt[1]
@@ -1876,7 +1887,7 @@ def PrepareTags(opts):
 			#logging.info(f'{cvtags}')
 	elif opts.ctag == '2': # сформировать список ранжированных тегов по всей таблице
 		with orm.db_session:
-			ctags = orm.select(x.tag for x in TagSEO if x.seo > 6.8 and x.seo < 13.2)
+			ctags = orm.select(x.tag for x in TagSEO if x.seo > WrkScore and x.seo < MaxScore)
 			lenсtags = len(ctags)
 			logging.info(f'Рабочих тегов {lenсtags}')
 
@@ -2405,7 +2416,7 @@ def BackupZeroTags(opts):
 	logging.info('Подготавливаем перемещение нулевых тегов в архивную таблицу')
 	cnt = 0
 	with orm.db_session():
-		ztags = TagSEO.select(lambda x: x.seo < 6.8).order_by(TagSEO.url)
+		ztags = TagSEO.select(lambda x: x.seo < WrkScore).order_by(TagSEO.url)
 		ztagslen = len(ztags)
 		logging.info(f'Отобрано для перемещения в архивную таблицу {ztagslen}')
 		for zt in ztags:
@@ -2557,10 +2568,17 @@ if __name__ == '__main__':
 	parser.add_argument('--wordsintitle',help='ranked tag will be estimated if wordsintitle words exists in title string', default='0')
 	parser.add_argument('--xls',help='to process excel file', default='-')
 	parser.add_argument('--short',help='to process excel file', default='100')
+<<<<<<< Updated upstream
+=======
+	parser.add_argument('--PMS',help='base pause value', default='0.20')
+>>>>>>> Stashed changes
 
 	args = parser.parse_args()
 	started_at = time.monotonic()
 	print(args.arch)
+	if args.PMS:
+		P100ms = float(args.PMS)
+	print(f'P100ms={P100ms}')
 	if args.tags == '0':
 		check_list(args)
 	elif args.tags == '1':

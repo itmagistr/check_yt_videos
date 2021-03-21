@@ -34,7 +34,7 @@ class TagSEO(db.Entity):
 	triple = orm.Optional(int)
 	tshow = orm.Optional(float)
 	ranked = orm.Optional(int)
-	hivolume = orm.Optional(int)
+	hivolume = orm.Optional(float)
 	data = orm.Optional(orm.Json)
 
 class TagUpdate(db.Entity):
@@ -69,7 +69,7 @@ class TagSEOArch(db.Entity):
 	triple = orm.Optional(int)
 	tshow = orm.Optional(float)
 	ranked = orm.Optional(int)
-	hivolume = orm.Optional(int)
+	hivolume = orm.Optional(float)
 	data = orm.Optional(orm.Json)
 
 db.generate_mapping(create_tables=True)
