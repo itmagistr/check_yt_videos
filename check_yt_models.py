@@ -72,4 +72,12 @@ class TagSEOArch(db.Entity):
 	hivolume = orm.Optional(float)
 	data = orm.Optional(orm.Json)
 
+
+class Like2Video(db.Entity):
+	dt = orm.Required(datetime.datetime, default=datetime.datetime.now())
+	vid = orm.Required(str)
+	auser = orm.Required(str)
+	jdata = orm.Optional(orm.Json)
+
+
 db.generate_mapping(create_tables=True)

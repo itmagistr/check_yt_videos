@@ -800,19 +800,11 @@ def getVideoList(opts):
 			
 			if len(yturls) > 0:
 				for v in plvideos:
-<<<<<<< Updated upstream
-					url = 'https://youtube.com/watch?v={}'.format(v["resourceId"]["videoId"])
-					if url not in yturls:
-						fl.writelines([url+'\n'])
-			else:
-				fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["resourceId"]["videoId"]) for v in plvideos])
-=======
 					url = 'https://youtube.com/watch?v={}'.format(v["id"])
 					if url not in yturls:
 						fl.writelines([url+'\n'])
 			else:
 				fl.writelines(['https://youtube.com/watch?v={}\n'.format(v["id"]) for v in plvideos])
->>>>>>> Stashed changes
 	return res
 
 def getFilename(opts):
@@ -881,6 +873,17 @@ def loadUrlsFromTxt(flname):
 				elif ('youtube.com' in curval) :
 					url = curval.replace('https://youtube.com/watch?v=', 'https://studio.youtube.com/video/')+'/edit'
 				res.append({'url': url, 'num': indx, 'title': 'Видео из текстового файла'})
+	return res
+
+def loadVideoUrlsFromTxt(flname):
+	res = []
+	if os.path.exists(flname):
+		indx = 0
+		with open(flname, 'r', encoding='utf-8') as fl:
+			for l in fl.readlines():
+				url = l.strip()
+				indx+=1
+				res.append({'url': url, 'num': indx,})
 	return res
 
 def check_list(opts):
@@ -2534,6 +2537,67 @@ def exitOnKey(k=b'q'):
 	except:
 		print(traceback.format_exc())
 
+def getVideoIDfromURL(url):
+	#TEST: выделить ИД видео из ссылки на видео
+	(videoID, videoURL) = getVID(url)
+	return videoID
+
+# простановка лайков по списку видео для активного пользователя, только для тех видео которые отсутствуют в таблице данных Like2Video
+def like2video(opts):
+	urls = []
+	#DONE: прочитать список видео из opts.infile
+	urls = loadVideoUrlsFromTxt(opts.infile)
+	urlslen = len(urls)
+	#DONE: подключиться к браузеру
+	driver = connect2Browser(opts)
+
+	#DONE: получить текущего пользователя ютюб
+	driver.get('https://youtube.com')
+	time.sleep(P100ms*20) # пауза 2 при заходе на очередное видео
+	try:
+		testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_xpath('//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]'))
+	except TimeoutException:
+		logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
+				
+	avatar_btn= driver.find_elements_by_xpath('//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]')
+	avatar_btn[0].click()
+	time.sleep(PMIN)
+	avatar_name = driver.find_elements_by_id('account-name')[0].text
+	#DONE: идти по списку видео, проверяя отсутствия записи в таблице
+	crow=0
+	for u in urls:
+		crow+=1
+		exitOnKey() # key q
+		logging.info('-------- Обработка {:03d} из {:03d} ({:06.2f} %), {}'.format(crow, urlslen, 100.00*crow/urlslen, u["url"]))
+		checkPauseKey() # key p
+		
+		vidID = getVideoIDfromURL(u["url"])
+		likeslen = 0
+		with orm.db_session():
+			#DONE: прочитать из БД наличие лайка
+			likes = Like2Video.select(lambda x: x.vid==vidID and x.auser==avatar_name)
+			likeslen = len(likes)
+		
+			if likeslen == 0:
+				#DONE: загрузить страницу видео
+				driver.get(u["url"])
+				time.sleep(P100ms*20) # пауза 2 при заходе на очередное видео
+				#DONE: прочитать текущее состояние кнопки Лайк, если уже установлен лайк, записать в БД
+				like_btn= driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[0]
+				#DONE: если лайк можно поставить, то поставить
+				#$x('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"][1]//button[@id="button" and @aria-pressed="false"]')[0]
+				btns = like_btn.find_elements_by_xpath('.//button[@id="button"]')
+				if btns[0].get_attribute('aria-pressed') == 'false':
+					like_btn.click()
+				#DONE: зафиксировать в БД установку лайка
+				newLike = Like2Video(vid=vidID, auser=avatar_name)
+				orm.flush()
+				logging.info('-------- поставили Лайк')
+			else:
+				logging.info('-------- Лайк уже установлен')
+		#DONE: перейти к следующему видео в списке или завершить работу
+	return 1
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--timeout', help='waiting timeout to load the page', default='10')
@@ -2568,10 +2632,8 @@ if __name__ == '__main__':
 	parser.add_argument('--wordsintitle',help='ranked tag will be estimated if wordsintitle words exists in title string', default='0')
 	parser.add_argument('--xls',help='to process excel file', default='-')
 	parser.add_argument('--short',help='to process excel file', default='100')
-<<<<<<< Updated upstream
-=======
 	parser.add_argument('--PMS',help='base pause value', default='0.20')
->>>>>>> Stashed changes
+	parser.add_argument('--likes', help='process likes', default='-')
 
 	args = parser.parse_args()
 	started_at = time.monotonic()
@@ -2579,7 +2641,9 @@ if __name__ == '__main__':
 	if args.PMS:
 		P100ms = float(args.PMS)
 	print(f'P100ms={P100ms}')
-	if args.tags == '0':
+	if args.likes == '1':
+		like2video(args)
+	elif args.tags == '0':
 		check_list(args)
 	elif args.tags == '1':
 		set_tags(args)
