@@ -2564,6 +2564,7 @@ def like2video(opts):
 	time.sleep(PMIN)
 	avatar_name = driver.find_elements_by_id('account-name')[0].text
 	#DONE: идти по списку видео, проверяя отсутствия записи в таблице
+	likes_cnt=0
 	crow=0
 	for u in urls:
 		crow+=1
@@ -2589,12 +2590,13 @@ def like2video(opts):
 				btns = like_btn.find_elements_by_xpath('.//button[@id="button"]')
 				if btns[0].get_attribute('aria-pressed') == 'false':
 					like_btn.click()
+					likes_cnt+=1
+					logging.info('Лайк ПОСТАВЛЕН {}'.format(likes_cnt))
 				#DONE: зафиксировать в БД установку лайка
 				newLike = Like2Video(vid=vidID, auser=avatar_name)
 				orm.flush()
-				logging.info('-------- поставили Лайк')
 			else:
-				logging.info('-------- Лайк уже установлен')
+				logging.info('Лайк есть')
 		#DONE: перейти к следующему видео в списке или завершить работу
 	return 1
 
