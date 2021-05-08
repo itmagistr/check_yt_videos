@@ -2584,11 +2584,13 @@ def like2video(opts):
 				time.sleep(P100ms*20) # пауза 2 при заходе на очередное видео
 				#DONE: прочитать текущее состояние кнопки Лайк, если уже установлен лайк, записать в БД
 				like_btn= driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[0]
+				#$x('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[2].click()
 				#DONE: если лайк можно поставить, то поставить
 				#$x('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"][1]//button[@id="button" and @aria-pressed="false"]')[0]
 				btns = like_btn.find_elements_by_xpath('.//button[@id="button"]')
 				if btns[0].get_attribute('aria-pressed') == 'false':
-					like_btn.click()
+					#like_btn.click()
+					driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[2].click()
 				#DONE: зафиксировать в БД установку лайка
 				newLike = Like2Video(vid=vidID, auser=avatar_name)
 				orm.flush()
