@@ -2592,7 +2592,8 @@ def like2video(opts):
 				if btns[0].get_attribute('aria-pressed') == 'false':
 					#like_btn.click()
 					#driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[2].click()
-					driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[6].click()
+					driver.find_elements_by_xpath('//*[@id="top-level-buttons-computed"]/ytd-toggle-button-renderer[1]')[0].click()
+					#driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[6].click()
 					likes_cnt+=1
 					logging.info('Лайк ПОСТАВЛЕН {}'.format(likes_cnt))
 				#DONE: зафиксировать в БД установку лайка
