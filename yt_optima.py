@@ -2633,7 +2633,9 @@ def like2video(opts):
                 
                 #cnt_likes = driver.find_elements_by_xpath('//div[@id="segmented-like-button"]//div[contains(@class, "cbox")]/span')[0]
                 # like_btns = driver.find_elements_by_xpath('//div[@id="top-row"]/*/*/*/*/div[@id="top-level-buttons-computed"]/*/div[@id="segmented-like-button"]/*/*/button[@aria-pressed="false"]') #ищем ненажатую кнопку лайка
-                like_btns = driver.find_elements_by_xpath('//*[@id="segmented-like-button"]/ytd-toggle-button-renderer/yt-button-shape/button[@aria-pressed="false"]')
+                # like_btns = driver.find_elements_by_xpath('//*[@id="segmented-like-button"]/ytd-toggle-button-renderer/yt-button-shape/button[@aria-pressed="false"]')
+                #like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button[@aria-pressed="false"]')
+                like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="false"]')
                 if len(like_btns) > 0:
                     like_btns[0].click()
                     # btns = driver.find_elements_by_xpath('//div[@id="top-row"]/*/*/*/*/div[@id="top-level-buttons-computed"]/*/div[@id="segmented-like-button"]')
@@ -2647,9 +2649,15 @@ def like2video(opts):
                     #driver.find_elements_by_xpath('//a[@class="yt-simple-endpoint style-scope ytd-toggle-button-renderer"]')[6].click()
                     likes_cnt+=1
                     logging.info('Лайк ПОСТАВЛЕН {}'.format(likes_cnt))
+                    
+                else:
+                    like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="false"]')
+                    if len(like_btns) > 0:
+                        logging.info('Кнопка Лайк уже поставлен')
+                        
                 #DONE: зафиксировать в БД установку лайка
                 newLike = Like2Video(vid=vidID, auser=avatar_name)
-                orm.flush()
+                orm.flush()       
             else:
                 logging.info('Лайк есть')
         #DONE: перейти к следующему видео в списке или завершить работу
