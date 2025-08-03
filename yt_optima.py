@@ -16,9 +16,11 @@ import googleapiclient.discovery   #клиент доступа к YouTube Data 
 from check_yt_models import *
 from pony import orm
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
 from selenium.common.exceptions import * #
 import logging
 logging.basicConfig()
@@ -94,17 +96,20 @@ def main(opts):
                 driver.get(u)
                 time.sleep(P100ms*20) # пауза 2 при заходе на очередное видео
                 try:
-                    testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-tripled-keywords"))
+                    # testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_class_name("stat-value-tripled-keywords"))
+                    testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element(By.CLASS_NAME, "stat-value-tripled-keywords"))
                 except TimeoutException:
                     logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
                     continue
                 
-                inpts = driver.find_elements_by_xpath("//ytcp-social-suggestion-input") #ytcp-mention-input
+                # inpts = driver.find_elements_by_xpath("//ytcp-social-suggestion-input") #ytcp-mention-input
+                inpts = driver.find_elements(By.XPATH, "//ytcp-social-suggestion-input") #ytcp-mention-input
                 vid_title = inpts[0].text
                 
                 if opts.update == '4':
                     # для видео добавить теги, которые входят в название и еще не проверялись под данным видео
-                    inpts = driver.find_elements_by_xpath("//ytcp-social-suggestion-input") #ytcp-mention-input
+                    # inpts = driver.find_elements_by_xpath("//ytcp-social-suggestion-input") #ytcp-mention-input
+                    inpts = driver.find_elements(By.XPATH, "//ytcp-social-suggestion-input") #ytcp-mention-input
                     vid_title = inpts[0].text
                     cnt = 0
                     for t in getTitleTags(i, u, vid_title, addTags):
@@ -113,7 +118,8 @@ def main(opts):
                     logging.info(f'тегов {cnt} для оценки с учетом названия "{vid_title}"')
                 elif opts.update in '01': #режим 0 или 1
                     #собрать теги
-                    for elm in driver.find_elements_by_xpath("//*[@id='child-input']//ytcp-chip[@role='button']"):
+                    # for elm in driver.find_elements_by_xpath("//*[@id='child-input']//ytcp-chip[@role='button']"):
+                    for elm in driver.find_elements(By.XPATH, "//*[@id='child-input']//ytcp-chip[@role='button']"):
                         text = elm.get_attribute('vidiq-keyword')
                         if opts.update == '0':
                             # все теги видео добавить к проверке
@@ -125,18 +131,20 @@ def main(opts):
 
                 
                 # добавить два слова для очистки тегов, чтобы гарантированно отображалась кнопка удалить все теги
-                elq = driver.find_element_by_id('text-input')
+                # elq = driver.find_element_by_id('text-input')
+                elq = driver.find_element(By.ID, 'text-input')
                 elq.click()
                 
                 # #clear all tags
                 doit_clear=2
                 while doit_clear>0:
                     try:
-                        di = driver.find_element_by_id('clear-button')
+                        # di = driver.find_element_by_id('clear-button')
+                        di = driver.find_element(By.ID, 'clear-button')
                         di.click()
                         doit_clear=0
                     except:
-                        logging.info("find_element_by_id('clear-button') Unexpected error: {}".format(sys.exc_info()[0]))
+                        logging.info("find_element(By.ID, 'clear-button') Unexpected error: {}".format(sys.exc_info()[0]))
                         elq.send_keys('wr1,wr2', Keys.ENTER)
                         time.sleep(PMIN)
                         doit_clear-=1
@@ -207,7 +215,8 @@ def connect2Browser(opts):
     logging.info('Попытка подключиться к браузеру 127.0.0.1:9222 ...')
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222") # запустить предварительно Хром
-    drv = webdriver.Chrome(opts.webdriver, options=chrome_options)
+    service = Service(opts.webdriver)
+    drv = webdriver.Chrome(service=service, options=chrome_options)
     time.sleep(P100ms*30) # пауза 3 при подключении к браузеру
     drv.set_page_load_timeout(60)
     drv.implicitly_wait(10)
@@ -720,12 +729,66 @@ def rateWords(drv, opts):
             flres.writelines([adw+'\n'])
     exit(999)
 
+def find_next_key(file_path, current_key):
+    """
+    Находит ключ в следующей строке текстового файла.
+
+    Args:
+        file_path (str): Путь к файлу.
+        current_key (str): Известный ключ.
+
+    Returns:
+        str: Ключ из следующей строки, либо первый ключ, либо пустая строка.
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print(f"Ошибка: файл не найден по пути {file_path}")
+        return ""
+
+    # Очищаем строки от пробелов и символов переноса строки
+    keys = [line.strip() for line in lines if line.strip()]
+
+    # Если файл пуст, возвращаем пустую строку
+    if not keys:
+        return ""
+
+    # Если известный ключ отсутствует, возвращаем первый ключ
+    if current_key not in keys:
+        return keys[0]
+
+    try:
+        # Находим индекс известного ключа
+        index = keys.index(current_key)
+        
+        # Проверяем, не является ли он последним
+        if index == len(keys) - 1:
+            # Если да, возвращаем пустую строку
+            return ""
+        else:
+            # Иначе, возвращаем ключ из следующей строки
+            return keys[index + 1]
+    except ValueError:
+        # Это исключение не должно возникнуть, так как мы уже проверили наличие ключа,
+        # но на всякий случай оставим его.
+        return keys[0]
+
+def initVideoClient(curKey, fileKeys):
+    api_service_name = "youtube"
+    api_version = "v3"
+    yt = None
+    newKey = find_next_key(fileKeys, curKey)
+    if len(curKey) > 0 :
+        yt = googleapiclient.discovery.build(api_service_name, api_version, developerKey=newKey, cache_discovery=False)
+    return newKey, yt
+
+# googleapiclient.errors.HttpError: <HttpError 403 when requesting https://youtube.googleapis.com/youtube/v3/videos?part=snippet%2CcontentDetails%2Cstatistics&chart=mostPopular&maxResults=10&regionCode=US&pageToken=&key=A...&alt=json returned "The request cannot be completed because you have exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.". Details: "[{'message': 'The request cannot be completed because you have exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.', 'domain': 'youtube.quota', 'reason': 'quotaExceeded'}]"> 
 
 def getVideoList(opts):
     # наименование сервиса Google
-    api_service_name = "youtube"
-    api_version = "v3"
-    youtube = googleapiclient.discovery.build(api_service_name, api_version, developerKey=opts.apiKey, cache_discovery=False)
+    curKey = ''
+    curKey, youtube = initVideoClient(curKey, opts.inapi)
     
     playlists=[]
     npage = 1
@@ -744,23 +807,39 @@ def getVideoList(opts):
         playlists.extend(response["items"])
     #logging.info(playlists)
     logging.info("Получена информация о {} плейлистах канала".format(len(playlists)))
-    plvideos = []
+    plvideos = [] # список видео
     npage = 0
-    for pl in playlists:
+    for pl in playlists: # проход по плейлистам
         npage+=1
         logging.info("Запрос списка видео плейлиста {} из {}".format(npage, len(playlists)))
+        
+        # stepRun = True
+        # while (len(curKey)>0) and (stepRun):
+        #     try:
+        #         if youtube is None:
+        #             curKey, youtube = initVideoClient(curKey, opts.inapi)
+                    
         request = youtube.playlistItems().list(
             part="snippet", 
             maxResults=50,
             playlistId=pl["id"] # плейлист
         )
         response = request.execute()
+            # except googleapiclient.errors.HttpError as error:
+            #     # Код в этом блоке выполнится, если возникнет ошибка HttpError
+            #     if error.resp.status == 403:
+            #         youtube = None
+            # except Exception:
+                
+                
         totalResults = response["pageInfo"]["totalResults"]
         logging.info(f'Предстоит получить информацию о {totalResults} видео')
         for itm in response["items"]:
             #plvideos.extend([itm["snippet"]])
+            
             req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
             resp = req.execute()
+            
             for elm in resp["items"]:
                 plvideos.extend([elm])
             
@@ -2593,14 +2672,17 @@ def like2video(opts):
     #driver.get('https://youtube.com')
     time.sleep(P100ms*20) # пауза 2 при заходе на очередное видео
     try:
-        testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_xpath('//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]'))
+        # testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element_by_xpath('//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]'))
+        testElm = WebDriverWait(driver, float(opts.timeout)).until(lambda x: x.find_element(By.XPATH, '//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]'))
     except TimeoutException:
         logging.info("Превышено время ожидания загрузки страницы. Попытка обработать следующую ссылку.")
                 
-    avatar_btn= driver.find_elements_by_xpath('//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]')
+    # avatar_btn= driver.find_elements_by_xpath('//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]')
+    avatar_btn= driver.find_elements(By.XPATH, '//button[@class="style-scope ytd-topbar-menu-button-renderer"][1]')
     avatar_btn[0].click()
     time.sleep(PMIN)
-    avatar_name = driver.find_elements_by_id('account-name')[0].text
+    # avatar_name = driver.find_elements_by_id('account-name')[0].text
+    avatar_name = driver.find_elements(By.ID, 'account-name')[0].text
     #DONE: идти по списку видео, проверяя отсутствия записи в таблице
     likes_cnt=0
     crow=0
@@ -2635,7 +2717,11 @@ def like2video(opts):
                 # like_btns = driver.find_elements_by_xpath('//div[@id="top-row"]/*/*/*/*/div[@id="top-level-buttons-computed"]/*/div[@id="segmented-like-button"]/*/*/button[@aria-pressed="false"]') #ищем ненажатую кнопку лайка
                 # like_btns = driver.find_elements_by_xpath('//*[@id="segmented-like-button"]/ytd-toggle-button-renderer/yt-button-shape/button[@aria-pressed="false"]')
                 #like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button[@aria-pressed="false"]')
-                like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="false"]')
+                # button style: yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading yt-spec-button-shape-next--segmented-start yt-spec-button-shape-next--enable-backdrop-filter-experiment
+                # //segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button
+                # TODO change XPath to check Like button
+                # like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="false"]')
+                like_btns = driver.find_elements(By.XPATH, '//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="false"]')
                 if len(like_btns) > 0:
                     like_btns[0].click()
                     # btns = driver.find_elements_by_xpath('//div[@id="top-row"]/*/*/*/*/div[@id="top-level-buttons-computed"]/*/div[@id="segmented-like-button"]')
@@ -2651,7 +2737,8 @@ def like2video(opts):
                     logging.info('Лайк ПОСТАВЛЕН {}'.format(likes_cnt))
                     
                 else:
-                    like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="false"]')
+                    # like_btns = driver.find_elements_by_xpath('//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="true"]')
+                    like_btns = driver.find_elements(By.XPATH, '//segmented-like-dislike-button-view-model/yt-smartimation/div/div/like-button-view-model/toggle-button-view-model/button-view-model/button[@aria-pressed="true"]')
                     if len(like_btns) > 0:
                         logging.info('Кнопка Лайк уже поставлен')
                         
@@ -2661,13 +2748,15 @@ def like2video(opts):
             else:
                 logging.info('Лайк есть')
         #DONE: перейти к следующему видео в списке или завершить работу
+    logging.info('Всего Лайков ПОСТАВЛЕНО {}'.format(likes_cnt))
     return 1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--timeout', help='waiting timeout to load the page', default='10')
     parser.add_argument('--infile', help='input file xlsm', default='_')
-    parser.add_argument('--webdriver', help='web driver path', default='C:\\bin\\Selenium\\chromedriver')
+    parser.add_argument('--inapi', help='input file api', default='_')
+    parser.add_argument('--webdriver', help='web driver path', default='C:\\bin\\Selenium\\chromedriver.exe')
     parser.add_argument('--update', help='update new and zero tags', default='0')
     # 0- сбор тегов для входных видео; 1-новые и с оценкой ноль теги добавить для проверки; 2-проверка тегов из других видео на seo под анализируемым видео
     parser.add_argument('--clipboard', help='inserts tags by clipboard', default='1')
@@ -2735,3 +2824,6 @@ if __name__ == '__main__':
     proctime = time.monotonic() - started_at
     logging.info(f'Выполнение сценария завершено за {proctime:.3f} сек.')
     # cmd line python yt_optima.py --timeout=12 --webdriver="C:\Windows\chromedriver.exe" --infile="!in.txt"
+
+
+# https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.183/win32/chromedriver-win32.zip
