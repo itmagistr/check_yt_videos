@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-#import json
+import time
 import msvcrt
 import statistics
 import traceback
@@ -22,23 +22,135 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import * #
+import functools
 import logging
 logging.basicConfig()
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger('googleapicliet.discovery_cache').setLevel(logging.CRITICAL)
 logging.getLogger().addHandler(logging.FileHandler("yt_optima.log"))
 
-P100ms = 0.20    # 0.05-0.20 - базовая пауза. Остальные паузы указаны кратными базовой
-PMIN = 10*P100ms # 10* - минимальная пауза для прорисовки пользовательского интерфейса
-MinScore =  0.8   # минимальное  значение тега для включения в рабочее облако
-WrkScore =  6.8   # начало рабочего диапазона тегов, лучше привести к 7.1
-MaxScore = 32.0   # максимальное значение тега для включения в рабочее облако
+P100ms = 0.20       # 0.05-0.20 - базовая пауза. Остальные паузы указаны кратными базовой
+PMIN = 10*P100ms    # 10* - минимальная пауза для прорисовки пользовательского интерфейса
+MinScore =  0.8     # минимальное  значение тега для включения в рабочее облако
+WrkScore =  6.8     # начало рабочего диапазона тегов, лучше привести к 7.1
+MaxScore = 32.0     # максимальное значение тега для включения в рабочее облако
+DEV_TEST_CNT = 200  # для рабочего режима установить 0; для быстрого тестирования > 0 - пропускает плейлисты содержащие более DEV_TEST_CNT
+ROW_GROUP_LOG = 50  # вывод инфо в лог каждые 50 обработанных элементов
 
 FLTYPE={'Обзор': {'litera': 'ov',},
         'Просмотры': {'litera': 'v',},
         'Взаимодействие': {'litera': 'iact',},
         'Аудитория': {'litera': 'aud',},
         }
+# для тестирования установить True, для основной работы установить False
+
+def readFromFile(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print(f"Ошибка: файл не найден по пути {file_path}")
+        return []
+
+    keys = [line.strip() for line in lines if line.strip()]
+    return keys
+
+def initYT(key):
+    api_service_name = "youtube"
+    api_version = "v3"
+    try:
+        # print(key)
+        yt = googleapiclient.discovery.build(api_service_name, api_version, developerKey=key, cache_discovery=False)
+        return yt
+    except:
+        return None
+    
+# {
+#   "error": {
+#     "code": 403,
+#     "message": "The request cannot be completed because you have exceeded your \u003ca href=\"/youtube/v3/getting-started#quota\"\u003equota\u003c/a\u003e.",
+#     "errors": [
+#       {
+#         "message": "The request cannot be completed because you have exceeded your \u003ca href=\"/youtube/v3/getting-started#quota\"\u003equota\u003c/a\u003e.",
+#         "domain": "youtube.quota",
+#         "reason": "quotaExceeded"
+#       }
+#     ]
+#   }
+# }
+
+# Декоратор для повторных попыток
+def retry_on_error(key_path):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            res = None
+            lenkeyarr = len(wrapper.keyarr)
+            while (res is None) and (wrapper.cur_key_index < lenkeyarr) :
+                try:
+                    # print(f"Attempt {wrapper.cur_key_index} of {lenkeyarr}...")
+                    result = func(wrapper.yt_obj, *args, **kwargs)
+                    # print(f"Success on attempt {wrapper.cur_key_index}.")
+                    res = result
+                except googleapiclient.errors.HttpError as e:
+                    # print(e.resp.status)
+                    if e.resp.status==403:
+                        wrapper.cur_key_index += 1
+                        if (wrapper.cur_key_index < lenkeyarr):
+                            wrapper.yt_obj = initYT(wrapper.keyarr[wrapper.cur_key_index])
+                except Exception as e:
+                    print(f"Error on attempt {wrapper.cur_key_index}: {e.resp} ")
+                    wrapper.cur_key_index = lenkeyarr
+                        
+                    
+            return res    
+        wrapper.keyarr = readFromFile(key_path)
+        wrapper.cur_key_index = 0
+        wrapper.yt_obj = initYT(wrapper.keyarr[wrapper.cur_key_index])
+        return wrapper
+    return decorator
+
+
+@retry_on_error(key_path="apiky.txt")
+def getVideoinfo(youtube, id=0): #itm["snippet"]["resourceId"]["videoId"]
+    
+    req = youtube.videos().list(part="snippet", maxResults=1, id=id)
+    resp = req.execute()
+    
+    return resp
+
+@retry_on_error(key_path="apiky.txt")
+def getPlaylists(youtube, chId='', pageToken=None):
+    
+    if pageToken is None:
+        request = youtube.playlists().list(part="id, snippet", maxResults=10, channelId=chId) # opts.chID 
+    else :
+        request = youtube.playlists().list(part="id, snippet", maxResults=10, channelId=chId, pageToken=pageToken) # opts.chID      
+    response = request.execute()
+     
+    return response
+
+@retry_on_error(key_path="apiky.txt")
+def getPlaylistItems(youtube, playlistId='', pageToken=None):
+    
+    if pageToken is None:
+        
+        request = youtube.playlistItems().list(
+                part="snippet", # заменить на snippet 
+                maxResults=50,
+                playlistId=playlistId # плейлист pl["id"]
+            )
+    else:
+        request = youtube.playlistItems().list(
+                part="snippet", # заменить на snippet 
+                maxResults=50,
+                pageToken=pageToken,
+                playlistId=playlistId # плейлист pl["id"]
+            )
+    response = request.execute()
+        
+    return response
+
 
 def main(opts):
     logging.info(f'Начало работы главного модуля')
@@ -728,81 +840,38 @@ def rateWords(drv, opts):
         for adw in addwrds:
             flres.writelines([adw+'\n'])
     exit(999)
-
-def find_next_key(file_path, current_key):
-    """
-    Находит ключ в следующей строке текстового файла.
-
-    Args:
-        file_path (str): Путь к файлу.
-        current_key (str): Известный ключ.
-
-    Returns:
-        str: Ключ из следующей строки, либо первый ключ, либо пустая строка.
-    """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        print(f"Ошибка: файл не найден по пути {file_path}")
-        return ""
-
-    # Очищаем строки от пробелов и символов переноса строки
-    keys = [line.strip() for line in lines if line.strip()]
-
-    # Если файл пуст, возвращаем пустую строку
-    if not keys:
-        return ""
-
-    # Если известный ключ отсутствует, возвращаем первый ключ
-    if current_key not in keys:
-        return keys[0]
-
-    try:
-        # Находим индекс известного ключа
-        index = keys.index(current_key)
-        
-        # Проверяем, не является ли он последним
-        if index == len(keys) - 1:
-            # Если да, возвращаем пустую строку
-            return ""
-        else:
-            # Иначе, возвращаем ключ из следующей строки
-            return keys[index + 1]
-    except ValueError:
-        # Это исключение не должно возникнуть, так как мы уже проверили наличие ключа,
-        # но на всякий случай оставим его.
-        return keys[0]
-
-def initVideoClient(curKey, fileKeys):
-    api_service_name = "youtube"
-    api_version = "v3"
-    yt = None
-    newKey = find_next_key(fileKeys, curKey)
-    if len(curKey) > 0 :
-        yt = googleapiclient.discovery.build(api_service_name, api_version, developerKey=newKey, cache_discovery=False)
-    return newKey, yt
-
+    
 # googleapiclient.errors.HttpError: <HttpError 403 when requesting https://youtube.googleapis.com/youtube/v3/videos?part=snippet%2CcontentDetails%2Cstatistics&chart=mostPopular&maxResults=10&regionCode=US&pageToken=&key=A...&alt=json returned "The request cannot be completed because you have exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.". Details: "[{'message': 'The request cannot be completed because you have exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.', 'domain': 'youtube.quota', 'reason': 'quotaExceeded'}]"> 
+# raise HttpError(resp, content, uri=self.uri)
+# googleapiclient.errors.HttpError: <HttpError 403 when requesting https://youtube.googleapis.com/youtube/v3/videos?part=snippet&maxResults=1&id=U5WknPIS_9E&key=AIzaSyApd6J4ybNj6DdpwjjuHvohs8rcj3Y45vg&alt=json returned "The request cannot be completed because you have exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.". Details: "[{'message': 'The request cannot be completed because you have exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.', 'domain': 'youtube.quota', 'reason': 'quotaExceeded'}]">
 
 def getVideoList(opts):
     # наименование сервиса Google
-    curKey = ''
-    curKey, youtube = initVideoClient(curKey, opts.inapi)
-    
+    # curKey = ''
+    # curKey, youtube = initVideoClient(curKey, opts.inapi)
+    # if not youtube:
+    #     logging.info("youtube client not initialized")
+    # else:
+    #     logging.info("youtube client not init {}, {}".format(curKey, youtube))
+        
     playlists=[]
     npage = 1
     tstr = ''
     # step 2 - получить список плейлистов
     ######################################
     logging.info("Получаем список плейлистов канала")
-    request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID) 
-    response = request.execute()
+    
+    # request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID) 
+    # response = request.execute()
+    response = getPlaylists(chId=opts.chID)
+    
     playlists.extend(response["items"])
     
     while 'nextPageToken' in response and response["nextPageToken"]:
-        request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID, pageToken=response["nextPageToken"])
-        response = request.execute()
+        
+        # request = youtube.playlists().list(part="id", maxResults=10, channelId=opts.chID, pageToken=response["nextPageToken"])
+        # response = request.execute()
+        response = getPlaylists(chId=opts.chID, pageToken=response["nextPageToken"])
         npage+=1
         playlists.extend(response["items"])
     #logging.info(playlists)
@@ -813,53 +882,57 @@ def getVideoList(opts):
         npage+=1
         logging.info("Запрос списка видео плейлиста {} из {}".format(npage, len(playlists)))
         
-        # stepRun = True
-        # while (len(curKey)>0) and (stepRun):
-        #     try:
-        #         if youtube is None:
-        #             curKey, youtube = initVideoClient(curKey, opts.inapi)
-                    
-        request = youtube.playlistItems().list(
-            part="snippet", 
-            maxResults=50,
-            playlistId=pl["id"] # плейлист
-        )
-        response = request.execute()
-            # except googleapiclient.errors.HttpError as error:
-            #     # Код в этом блоке выполнится, если возникнет ошибка HttpError
-            #     if error.resp.status == 403:
-            #         youtube = None
-            # except Exception:
-                
+             
+        # request = youtube.playlistItems().list(
+        #     part="snippet", 
+        #     maxResults=50,
+        #     playlistId=pl["id"] # плейлист
+        # )
+        # response = request.execute()
+        response = getPlaylistItems(playlistId=pl["id"])
+                 
                 
         totalResults = response["pageInfo"]["totalResults"]
+        if DEV_TEST_CNT > 0 and totalResults > ROW_GROUP_LOG:
+            continue
         logging.info(f'Предстоит получить информацию о {totalResults} видео')
+        cur_video_num = 0
         for itm in response["items"]:
             #plvideos.extend([itm["snippet"]])
             
-            req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
-            resp = req.execute()
-            
+            # req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
+            # resp = req.execute()
+            cur_video_num += 1
+            if cur_video_num % ROW_GROUP_LOG == 0:
+                logging.info(f'Получено информации о {cur_video_num} из {totalResults} видео')
+            resp = getVideoinfo(id=itm["snippet"]["resourceId"]["videoId"])   
             for elm in resp["items"]:
-                plvideos.extend([elm])
+                plvideos.extend([{"pl": pl, "video": elm}])
             
         while 'nextPageToken' in response:# and response["nextPageToken"] is not None:
             npToken = response.get('nextPageToken','not Found')
             
-            request = youtube.playlistItems().list(
-                part="snippet", # заменить на snippet 
-                maxResults=50,
-                pageToken=npToken,
-                playlistId=pl["id"] # плейлист
-            )
-            response = request.execute()
+            # request = youtube.playlistItems().list(
+            #     part="snippet", # заменить на snippet 
+            #     maxResults=50,
+            #     pageToken=npToken,
+            #     playlistId=pl["id"] # плейлист
+            # )
+            # response = request.execute()
+            response = getPlaylistItems(playlistId=pl["id"], pageToken=npToken)
+            
             #logging.info(response['items'])
             for itm in response["items"]:
                 #plvideos.extend([itm["snippet"]]) # накапливаем список видео, обновляем характеристики видео, далее собираем только статистику
-                req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
-                resp = req.execute()
+                
+                # req = youtube.videos().list(part="snippet", maxResults=1, id=itm["snippet"]["resourceId"]["videoId"])
+                # resp = req.execute()
+                cur_video_num += 1
+                if cur_video_num % 10 == 0:
+                    logging.info(f'Получено информации о {cur_video_num} из {totalResults} видео')
+                resp = getVideoinfo(id=itm["snippet"]["resourceId"]["videoId"])   
                 for elm in resp["items"]:
-                    plvideos.extend([elm])
+                    plvideos.extend([{"pl": pl, "video": elm}])
 
     #plvideos["channelId"]
     #plvideos["resourceId"]["videoId"]
@@ -877,25 +950,43 @@ def getVideoList(opts):
         ws.title = "Видео"
         cr = 1
         ws.cell(row=cr, column=1, value='channel')
-        ws.cell(row=cr, column=2, value='url')
-        ws.cell(row=cr, column=3, value='short description')
-        ws.cell(row=cr, column=4, value='zero time exists')
-        ws.cell(row=cr, column=5, value='zero time hashtag exists')
-        ws.cell(row=cr, column=6, value='title')
-        ws.cell(row=cr, column=7, value='description')
-
+        ws.cell(row=cr, column=2, value='pl code')
+        ws.cell(row=cr, column=3, value='pl title')
+        ws.cell(row=cr, column=4, value='pl url')
+        ws.cell(row=cr, column=5, value='url')
+        ws.cell(row=cr, column=6, value='short description')
+        ws.cell(row=cr, column=7, value='zero time exists')
+        ws.cell(row=cr, column=8, value='zero time hashtag exists')
+        ws.cell(row=cr, column=9, value='title')
+        ws.cell(row=cr, column=10, value='description')
 
         for v in plvideos:
             cr+=1
-            ws.cell(row=cr, column=1, value=v["snippet"]["channelTitle"])
-            ws.cell(row=cr, column=2, value='https://youtube.com/watch?v={}'.format(v["id"]))
-            ws.cell(row=cr, column=3, value=shortdescription(v["snippet"]["title"], v["snippet"]["description"], int(opts.short)))
-            ws.cell(row=cr, column=4, value=zerotime_exists(v["snippet"]["description"]))
-            ws.cell(row=cr, column=5, value=zerotimehashtag_exists(v["snippet"]["description"]))
-            ws.cell(row=cr, column=6, value=v["snippet"]["title"])
-            ws.cell(row=cr, column=7, value=v["snippet"]["description"])
+            ws.cell(row=cr, column=1, value=v["video"]["snippet"]["channelTitle"])
             
-
+            ws.cell(row=cr, column=2, value=v["pl"]["id"])
+            ws.cell(row=cr, column=3, value=v["pl"]["snippet"]["title"]) # еще есть поле: snippet.localized.title
+            ws.cell(row=cr, column=4, value='https://youtube.com//playlist?list={}'.format(v["pl"]["id"]))
+            
+            ws.cell(row=cr, column=5, value='https://youtube.com/watch?v={}'.format(v["video"]["id"]))
+            ws.cell(row=cr, column=6, value=shortdescription(v["video"]["snippet"]["title"], v["video"]["snippet"]["description"], int(opts.short)))
+            ws.cell(row=cr, column=7, value=zerotime_exists(v["video"]["snippet"]["description"]))
+            ws.cell(row=cr, column=8, value=zerotimehashtag_exists(v["video"]["snippet"]["description"]))
+            ws.cell(row=cr, column=9, value=v["video"]["snippet"]["title"])
+            ws.cell(row=cr, column=10, value=v["video"]["snippet"]["description"])
+        
+        # Установка ширины столбцов
+        ws.column_dimensions['A'].width = 20
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 20
+        ws.column_dimensions['D'].width = 20
+        ws.column_dimensions['E'].width = 40
+        ws.column_dimensions['F'].width = 13
+        ws.column_dimensions['G'].width = 13
+        ws.column_dimensions['H'].width = 20
+        ws.column_dimensions['I'].width = 95
+        # Включение автофильтра на первой строке
+        ws.auto_filter.ref = "A1:I1" 
         wb.save(res)
     else:
         with open(res, 'w', encoding='utf-8') as fl:
@@ -2574,6 +2665,7 @@ def BackupZeroTags(opts):
                 orm.flush()
     logging.info(f'удаленных записей {cnt}')
     return 1
+
 def RestoreZeroTags(opts):
     logging.info('Подготавливаем перемещение нулевых тегов в основную таблицу')
     cnt = 0
@@ -2827,3 +2919,6 @@ if __name__ == '__main__':
 
 
 # https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.183/win32/chromedriver-win32.zip
+
+
+# выводить какой-то прогресс загрузки
